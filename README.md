@@ -36,6 +36,11 @@ Design: path C of `research/report.html`, section 11.
 - Only Linux and Windows have been tested.
 - One window per process.
 
+## Documentation
+
+- [Usage guide](https://dd86k.github.io/dendrite/), a chapter per topic.
+- [API reference](https://dd86k.github.io/dendrite/api/), every module.
+
 ## Layout
 
 | Path | What |
