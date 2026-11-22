@@ -19,7 +19,7 @@ jobs:
       - name: Packages
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends ca-certificates curl xz-utils git gcc libc6-dev \
+          apt-get install -y --no-install-recommends ca-certificates curl xz-utils gpg git gcc libc6-dev \
             libsdl3-dev libfreetype-dev libharfbuzz-dev
       - uses: actions/checkout@v5
       - uses: dlang-community/setup-dlang@v2
