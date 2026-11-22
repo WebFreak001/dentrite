@@ -1,0 +1,5 @@
+(pad 8
+  (column 4 stretch
+    (row 4 center (text "Filter") (grow (box 0 20)))
+    (grow (pad 4 (column 0 stretch (text "main.d:42"))))
+    (row 4 center (text "5 of 5 shown" @summary) (grow (box 0 0)) (box 120 24))))

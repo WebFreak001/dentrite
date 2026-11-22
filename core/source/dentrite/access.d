@@ -1,0 +1,582 @@
+/// Accessibility tree for screen readers and UI tests: roles, names, states and actions of the nodes.
+///
+/// Nodes fill an `AccessInfo` in `Node.describe`. `AccessTree` walks the tree after a frame and keeps what it sent,
+/// so a platform adapter gets only the nodes that changed. A node with `Role.none` stays out and its children join
+/// the nearest ancestor that is in. Nothing here knows a platform API, adapters map roles to their own.
+module dentrite.access;
+
+import dentrite.geom : Rect;
+import dentrite.node : Node, Tree;
+import std.math : isNaN;
+
+/// What a node is to an assistive technology.
+enum Role : ubyte
+{
+    none,               /// not exposed, children join the nearest exposed ancestor
+    window,             /// the window, root of the tree
+    group,              /// related controls
+    pane,               /// dock pane or panel with a title
+    label,              /// static text
+    button,             /// push button
+    checkBox,           /// on or off
+    radioButton,        /// one of a group
+    slider,             /// number in a range
+    progressIndicator,  /// progress of a task
+    textInput,          /// single line text
+    multilineTextInput, /// text over several lines
+    spinButton,         /// number with step buttons
+    comboBox,           /// choice from a popup list
+    listBox,            /// list of choices
+    listBoxOption,      /// row of a list
+    tree,               /// hierarchical list
+    treeItem,           /// row of a tree
+    table,              /// rows and columns
+    row,                /// table row
+    cell,               /// table cell
+    columnHeader,       /// table column header
+    tabList,            /// row of tabs
+    tab,                /// one tab
+    tabPanel,           /// content of the chosen tab
+    menu,               /// popup menu
+    menuBar,            /// window menu bar
+    menuItem,           /// menu entry
+    menuItemCheckBox,   /// menu entry with a check mark
+    dialog,             /// dialog window
+    tooltip,            /// tooltip text
+    scrollView,         /// scrolled content
+    separator,          /// divider line
+    image,              /// picture or icon
+}
+
+/// State of a check box or toggle.
+enum Toggle : ubyte
+{
+    none, /// not a toggle
+    off,  /// unchecked
+    on,   /// checked
+    mixed, /// partly checked
+}
+
+/// Optional yes or no, for states that only some roles have.
+enum Tri : ubyte
+{
+    unset, /// the role has no such state
+    no,    /// false
+    yes,   /// true
+}
+
+/// `Tri` of `b`.
+Tri tri(bool b)
+{
+    return b ? Tri.yes : Tri.no;
+}
+
+/// What an assistive technology can ask a node to do.
+enum AccessAction : ubyte
+{
+    click,           /// default action, as a press would
+    focus,           /// take keyboard focus
+    increment,       /// step up
+    decrement,       /// step down
+    setValue,        /// replace text or number
+    expand,          /// open children or a popup
+    collapse,        /// close children or a popup
+    scrollIntoView,  /// bring into the visible part of its scroll views
+    showContextMenu, /// open the context menu
+}
+
+/// Accessible description of a node, filled by `Node.describe`.
+struct AccessInfo
+{
+    Role role;          /// role, `Role.none` to stay out
+    string label;       /// name, such as a caption
+    string value;       /// text content or current choice
+    string description; /// longer help, the tooltip if not set and the node has a label
+    string placeholder; /// hint shown in an empty text field
+    string shortcut;    /// key that runs it, such as "Ctrl+S"
+    Toggle toggled;     /// check state
+    Tri selected;       /// whether it is the chosen row, tab or option
+    Tri expanded;       /// whether its children or popup are open
+    bool disabled;      /// shown but inactive
+    bool readOnly;      /// value cannot be edited
+    bool modal;         /// blocks the rest of the window
+    bool multiselectable; /// several rows can be chosen
+    bool leaf;          /// children stay out, for nodes that name themselves
+    bool hidden;        /// the node and its children stay out
+    double number;      /// numeric value, NaN for none
+    double min;         /// lowest numeric value, NaN for none
+    double max;         /// highest numeric value, NaN for none
+    double step;        /// step of increment and decrement, NaN for none
+    uint level;         /// tree depth from 1, 0 for none
+    uint position;      /// place in its set from 1, 0 for none
+    uint setSize;       /// items in its set, 0 for none
+    size_t caret = size_t.max;  /// text fields: caret as a byte offset into `value`, `size_t.max` for none
+    size_t anchor = size_t.max; /// text fields: other end of the selection, the caret when nothing is selected
+    ushort actions;     /// supported actions, one bit per `AccessAction` value
+
+    /// Adds `a` to the supported actions.
+    void allow(AccessAction a)
+    {
+        actions |= cast(ushort)(1 << a);
+    }
+
+    /// True if `a` is supported.
+    bool allows(AccessAction a) const
+    {
+        return (actions & (1 << a)) != 0;
+    }
+
+    /// Field by field, with NaN equal to NaN.
+    bool opEquals(ref const AccessInfo o) const
+    {
+        static foreach (size_t i; 0 .. this.tupleof.length)
+        {
+            static if (__traits(isFloating, this.tupleof[i]))
+            {
+                if (this.tupleof[i] != o.tupleof[i] && (isNaN(this.tupleof[i]) && isNaN(o.tupleof[i])) == false)
+                {
+                    return false;
+                }
+            }
+            else if (this.tupleof[i] != o.tupleof[i])
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+}
+
+/// Node as an adapter sees it.
+struct AccessNode
+{
+    ulong id;         /// node id, stable for the node's life
+    AccessInfo info;  /// what the node exposes
+    Rect bounds;      /// bounds in window coordinates, logical pixels
+    ulong[] children; /// exposed children in order
+
+    /// Same description, bounds and children.
+    bool opEquals(ref const AccessNode o) const
+    {
+        return id == o.id && info == o.info && bounds == o.bounds && children == o.children;
+    }
+}
+
+/// Nodes for an adapter, from `AccessTree.update`.
+struct AccessUpdate
+{
+    AccessNode[] nodes; /// changed and new nodes, every node when `full`
+    ulong root;         /// id of the window node
+    ulong focus;        /// id of the focused node, the window node when none
+    bool full;          /// first update after an adapter activated
+}
+
+/// What an assistive technology asked for, delivered as an `Event` of kind `access`.
+struct AccessRequest
+{
+    ulong target;        /// id of the node to act on
+    AccessAction action; /// action to run
+    string text;         /// `setValue`: new text, null when `number` is set
+    double number;       /// `setValue`: new number, NaN when `text` is set
+}
+
+/// What the next update must hold, from `AccessAdapter.demand`.
+enum AccessDemand
+{
+    none,    /// no assistive technology listens
+    changes, /// only the changed nodes
+    full,    /// every node, after activation
+}
+
+/// Platform side of accessibility. The host updates it after every frame while `demand` is not `none`.
+interface AccessAdapter
+{
+    /// What the next update must hold. Reading `full` resets it to `changes`. Called on the UI thread.
+    AccessDemand demand();
+    /// Sends `u`. Bounds are logical, `scale` is physical pixels per logical pixel.
+    void update(ref const AccessUpdate u, float scale);
+}
+
+/// Node holding focus for controls it draws itself, such as an island, reports which one has it.
+interface AccessFocus
+{
+    Node accessFocus(); /// node with focus inside, or null for this node
+}
+
+/// Node that runs actions for descendants without their own, such as an island for its controls.
+interface AccessActions
+{
+    /// Runs `r` on `n`, true if done.
+    bool accessActionFor(Node n, ref const AccessRequest r);
+}
+
+/// Node whose exposed descendants are not its children, such as an island and its last pass.
+interface AccessContent
+{
+    Node accessContent(); /// root of those nodes, or null
+}
+
+/// Node drawing several items without a node each, such as a tab strip. Each item is exposed as a child of the
+/// node, after its own.
+interface AccessParts
+{
+    size_t accessPartCount();                                   /// number of items
+    void describePart(size_t i, ref AccessInfo a, ref Rect r);  /// fills item `i`, `r` starts as the node's bounds
+    bool accessPartAction(size_t i, ref const AccessRequest r); /// runs `r` on item `i`, true if done
+    ptrdiff_t accessFocusPart();                                /// item with the node's focus, or -1
+}
+
+/// Id of the window node.
+enum ulong accessRootId = 1;
+
+/// Next id for a node without one. Ids with one of the top three bits set are left to islands, parts and text
+/// runs.
+private ulong nextAccessId = accessRootId + 1;
+
+/// Id of `n`, assigned on first use.
+ulong accessIdOf(Node n)
+{
+    if (n.accessId == 0)
+    {
+        n.accessId = nextAccessId++;
+    }
+    return n.accessId;
+}
+
+/// Exposed nodes of a tree and what was last sent for them.
+final class AccessTree
+{
+    string title;                  /// window title, the name of the window node
+    private AccessNode[ulong] sent; /// nodes as last sent, by id
+    private Node[ulong] nodes;      /// tree node by id, as of the last update
+    private AccessActions[ulong] handlers; /// node running the actions of a node by id, where not the node
+    private size_t[ulong] parts;    /// item index of the ids that stand for an `AccessParts` item
+
+    /// Nodes changed since the last update, or all of them when `full`, with `focus` mapped to its id.
+    AccessUpdate update(Tree t, Node focus, bool full)
+    {
+        AccessNode[ulong] now;
+        Node[ulong] byId;
+        AccessNode root;
+        root.id = accessRootId;
+        root.info.role = Role.window;
+        root.info.label = title;
+        root.bounds = Rect(0, 0, t.viewport.w, t.viewport.h);
+        AccessActions[ulong] by;
+        parts = null;
+        collect(t.root, root.children, now, byId, by, null);
+        now[root.id] = root;
+        AccessUpdate u;
+        u.root = accessRootId;
+        u.full = full;
+        u.focus = focusId(focus, byId);
+        foreach (ulong id, ref AccessNode n; now)
+        {
+            const(AccessNode)* old = id in sent;
+            if (full || old is null || *old != n)
+            {
+                u.nodes ~= n;
+            }
+        }
+        sent = now;
+        nodes = byId;
+        handlers = by;
+        return u;
+    }
+
+    /// Tree node of `id` as of the last update, or null.
+    Node nodeOf(ulong id)
+    {
+        Node* n = id in nodes;
+        return n is null ? null : *n;
+    }
+
+    /// Last sent node of `id`, or null.
+    const(AccessNode)* find(ulong id) const
+    {
+        return id in sent;
+    }
+
+    /// First node in tree order with `role` and `label`, or null. For tests.
+    const(AccessNode)* find(Role role, string label) const
+    {
+        return search(accessRootId, role, label);
+    }
+
+    /// Depth first search under `id`.
+    private const(AccessNode)* search(ulong id, Role role, string label) const
+    {
+        const(AccessNode)* n = id in sent;
+        if (n is null)
+        {
+            return null;
+        }
+        if (n.info.role == role && n.info.label == label)
+        {
+            return n;
+        }
+        foreach (ulong c; n.children)
+        {
+            if (const(AccessNode)* hit = search(c, role, label))
+            {
+                return hit;
+            }
+        }
+        return null;
+    }
+
+    /// Index of the item `id` stands for in the `AccessParts` node `nodeOf(id)` returns, or -1 when `id` is that
+    /// node itself.
+    ptrdiff_t partOf(ulong id)
+    {
+        size_t* i = id in parts;
+        return i is null ? -1 : *i;
+    }
+
+    /// Node running the actions of `id` for it, such as its island, or null.
+    AccessActions handlerOf(ulong id)
+    {
+        AccessActions* h = id in handlers;
+        return h is null ? null : *h;
+    }
+
+    /// Adds the exposed nodes under `n` to `into`, their descriptions to `now`, and `owner` as the action handler
+    /// of each when set.
+    private void collect(Node n, ref ulong[] into, ref AccessNode[ulong] now, ref Node[ulong] byId,
+        ref AccessActions[ulong] by, AccessActions owner)
+    {
+        Node[] kids = n.children;
+        if (AccessContent ac = cast(AccessContent) n)
+        {
+            Node inner = ac.accessContent();
+            kids = inner is null ? null : [inner];
+        }
+        if (AccessActions h = cast(AccessActions) n)
+        {
+            owner = h;
+        }
+        foreach (Node c; kids)
+        {
+            AccessInfo a;
+            c.describe(a);
+            if (a.hidden)
+            {
+                continue;
+            }
+            if (a.role == Role.none)
+            {
+                collect(c, into, now, byId, by, owner);
+                continue;
+            }
+            if (c.accessName !is null)
+            {
+                a.label = c.accessName;
+            }
+            if (a.label.length == 0 && a.role != Role.label)
+            {
+                a.label = c.tooltip;
+            }
+            else if (a.description.length == 0)
+            {
+                a.description = c.tooltip;
+            }
+            if (c.focusable && a.disabled == false)
+            {
+                a.allow(AccessAction.focus);
+            }
+            AccessNode an;
+            an.id = accessIdOf(c);
+            an.info = a;
+            an.bounds = c.bounds;
+            if (a.leaf == false)
+            {
+                collect(c, an.children, now, byId, by, owner);
+            }
+            if (AccessParts p = cast(AccessParts) c)
+            {
+                foreach (size_t i; 0 .. p.accessPartCount())
+                {
+                    AccessNode pn;
+                    pn.id = partId(an.id, i);
+                    pn.bounds = an.bounds;
+                    p.describePart(i, pn.info, pn.bounds);
+                    an.children ~= pn.id;
+                    now[pn.id] = pn;
+                    byId[pn.id] = c;
+                    parts[pn.id] = i;
+                }
+            }
+            into ~= an.id;
+            now[an.id] = an;
+            byId[an.id] = c;
+            if (owner !is null)
+            {
+                by[an.id] = owner;
+            }
+        }
+    }
+
+    /// Id of item `i` of the node with id `id`. Bit 62 keeps it apart from other ids, bit 63 from islands.
+    private static ulong partId(ulong id, size_t i)
+    {
+        return (hashOf(i, id) | 1UL << 62) & ~(1UL << 63);
+    }
+
+    /// Id of the nearest exposed node at or above `focus`, asking `AccessFocus` and `AccessParts` nodes first.
+    private ulong focusId(Node focus, ref Node[ulong] byId)
+    {
+        if (AccessFocus f = cast(AccessFocus) focus)
+        {
+            if (Node inner = f.accessFocus())
+            {
+                focus = inner;
+            }
+        }
+        if (AccessParts p = cast(AccessParts) focus)
+        {
+            ptrdiff_t i = p.accessFocusPart();
+            if (i >= 0 && focus.accessId != 0 && (focus.accessId in byId) !is null)
+            {
+                return partId(focus.accessId, i);
+            }
+        }
+        for (Node n = focus; n !is null; n = n.parent)
+        {
+            if (n.accessId != 0 && (n.accessId in byId) !is null)
+            {
+                return n.accessId;
+            }
+        }
+        return accessRootId;
+    }
+}
+
+/// Text of the labels under `n` in tree order, joined by `sep`, for rows named by their content.
+string contentText(Node n, string sep = " ")
+{
+    string s;
+    foreach (Node c; n.children)
+    {
+        AccessInfo a;
+        c.describe(a);
+        string part = a.role == Role.label ? a.label : contentText(c, sep);
+        if (a.hidden || part.length == 0)
+        {
+            continue;
+        }
+        s ~= s.length > 0 ? sep ~ part : part;
+    }
+    return s;
+}
+
+// The host sends the whole tree when an adapter starts listening, then only what changed, and runs actions.
+unittest
+{
+    import dentrite.backend.software : SoftwareRenderer;
+    import dentrite.containers : column;
+    import dentrite.headless : HeadlessPlatform;
+    import dentrite.host : Host;
+    import dentrite.immediate : Ui;
+    import dentrite.island : island;
+    import dentrite.platform : Event, EventKind, WindowOptions;
+    import dentrite.signals : Signal, signal;
+    import dentrite.widgets.button : button;
+    import dentrite.widgets.checkbox : checkbox;
+    import dentrite.widgets.label : label;
+
+    WindowOptions o;
+    o.title = "Test";
+    o.accessibility = true;
+    o.fonts = ["fonts/Inter-Regular.otf", "fonts/Inter-SemiBold.otf", "fonts/JetBrainsMono-Regular.ttf"];
+    HeadlessPlatform p = new HeadlessPlatform(300, 200);
+    Host h = new Host(p, new SoftwareRenderer, o);
+    scope (exit)
+    {
+        h.close();
+    }
+
+    /// Sends `action` to node `id` and runs a frame.
+    void ask(ulong id, AccessAction action)
+    {
+        Event e = {kind: EventKind.access, request: AccessRequest(id, action)};
+        h.handle(e);
+        h.frame();
+    }
+
+    int saved;
+    Signal!bool wrap = signal(false);
+    h.setRoot(column()(label("Settings"), button("Save", onClick: () { ++saved; }), checkbox(wrap, "Wrap")));
+    h.frame();
+    assert(p.accessUpdates.length == 0, "nothing is sent while no one listens");
+    p.listening = AccessDemand.full;
+    h.frame();
+    AccessUpdate u = p.accessUpdates[$ - 1];
+    assert(u.full && u.nodes.length == 4 && u.focus == accessRootId);
+    assert(h.access.find(accessRootId).info.label == "Test");
+    assert(h.access.find(Role.label, "Settings") !is null);
+    const(AccessNode)* save = h.access.find(Role.button, "Save");
+    assert(save.info.allows(AccessAction.click) && save.info.allows(AccessAction.focus));
+    ask(save.id, AccessAction.click);
+    assert(saved == 1);
+    h.click(Role.button, "Save");
+    assert(saved == 2 && h.find(Role.checkBox, "Wrap") !is null && h.find(Role.button, "Load") is null,
+        "tests find and click by role and name, apart from what the adapter is sent");
+
+    ulong box = h.access.find(Role.checkBox, "Wrap").id;
+    size_t sent = p.accessUpdates.length;
+    ask(box, AccessAction.click);
+    assert(wrap.peek);
+    u = p.accessUpdates[$ - 1];
+    assert(p.accessUpdates.length == sent + 1 && u.full == false, "a change sends one update");
+    assert(u.nodes.length == 1 && u.nodes[0].id == box && u.nodes[0].info.toggled == Toggle.on);
+    ask(save.id, AccessAction.focus);
+    assert(p.accessUpdates[$ - 1].focus == save.id && h.focused.accessId == save.id);
+    sent = p.accessUpdates.length;
+    h.requestFrame();
+    h.frame();
+    assert(p.accessUpdates.length == sent, "an unchanged tree sends nothing");
+
+    int went;
+    bool bold;
+    h.setRoot(island((Ui ui) {
+        if (ui.button("Go"))
+        {
+            ++went;
+        }
+        ui.checkbox(bold, "Bold");
+    }));
+    h.frame();
+    ulong go = h.access.find(Role.button, "Go").id;
+    assert(go >> 63 == 1 && h.access.find(Role.group, null) !is null);
+    ask(go, AccessAction.click);
+    assert(went == 1);
+    assert(h.access.find(Role.button, "Go").id == go, "island controls keep their ids across passes");
+    ulong b = h.access.find(Role.checkBox, "Bold").id;
+    ask(b, AccessAction.focus);
+    assert(p.accessUpdates[$ - 1].focus == b, "focus inside an island goes to the control");
+    ask(b, AccessAction.click);
+    assert(bold && h.access.find(b).info.toggled == Toggle.on);
+}
+
+/// True if every exposed node under `n` is a label, so a row named by `contentText` can leave them out.
+bool textOnly(Node n)
+{
+    foreach (Node c; n.children)
+    {
+        AccessInfo a;
+        c.describe(a);
+        if (a.hidden == false && ((a.role != Role.none && a.role != Role.label) || textOnly(c) == false))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+/// Text of `n` itself if it is a label, else of the labels under it, for cells named by their content.
+string nodeText(Node n, string sep = " ")
+{
+    AccessInfo a;
+    n.describe(a);
+    return a.role == Role.label ? a.label : contentText(n, sep);
+}

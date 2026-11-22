@@ -1,0 +1,237 @@
+# Dark theme for the debugger example. Ctrl+R reloads it while running.
+# Colors are #rrggbb, #rrggbbaa or a palette token defined above.
+
+[palette]
+gray.950 = #111113
+gray.900 = #17171a
+gray.850 = #1c1c20
+gray.800 = #222227
+gray.750 = #29292f
+gray.700 = #323239
+gray.600 = #43434c
+gray.500 = #5a5a64
+gray.400 = #7d7d88
+gray.300 = #a3a3ad
+gray.200 = #d2d2d8
+gray.100 = #ececf0
+blue.400 = #6aa5ff
+blue.500 = #3b82f6
+blue.600 = #2f6bd6
+blue.700 = #2558b0
+red.400 = #f47a7a
+red.500 = #e5484d
+red.900 = #3b2224
+red.800 = #4c292c
+amber.400 = #f2b950
+green.400 = #5ad08a
+white = #ffffff
+accent = blue.500
+
+[window]
+background = gray.900
+
+[text]
+color = gray.200
+size = 13
+
+[text.muted]
+color = gray.400
+
+[text.strong]
+font = uiStrong
+color = gray.100
+
+[text.mono]
+font = mono
+size = 12.5
+
+[text.monoMuted]
+font = mono
+size = 12.5
+color = gray.400
+
+[text.heading]
+font = uiStrong
+size = 11.5
+color = gray.300
+
+[text.accent]
+color = blue.400
+
+[text.changed]
+font = mono
+size = 12.5
+color = amber.400
+
+[text.error]
+color = red.400
+
+[text.warn]
+color = amber.400
+
+[island]
+focus = blue.500
+
+[button]
+fill = gray.700
+fillHover = gray.600
+fillPressed = gray.750
+fillDisabled = gray.800
+text = gray.100
+textDisabled = gray.500
+focus = blue.500
+radius = 4
+padX = 10
+padY = 4
+
+[button.primary]
+fill = blue.600
+fillHover = blue.500
+fillPressed = blue.700
+text = white
+
+[button.danger]
+fill = red.900
+fillHover = red.800
+fillPressed = red.900
+text = red.400
+
+[button.toolbar]
+fill = #00000000
+fillHover = gray.750
+fillPressed = gray.700
+fillDisabled = #00000000
+padX = 8
+padY = 5
+
+[checkbox]
+box = gray.850
+boxHover = gray.800
+border = gray.500
+checked = blue.600
+checkedHover = blue.500
+boxDisabled = gray.800
+text = gray.200
+textDisabled = gray.500
+focus = blue.500
+
+[textbox]
+fill = gray.950
+fillFocus = gray.950
+fillDisabled = gray.850
+border = gray.700
+borderFocus = blue.500
+text = gray.100
+textDisabled = gray.500
+placeholder = gray.500
+selection = #2f5ca8
+caret = gray.100
+
+[list]
+rowHover = #ffffff0a
+rowSelected = #3b82f62e
+selectedBar = blue.500
+focus = blue.500
+padX = 8
+padY = 3
+
+[panel.toolbar]
+fill = gray.800
+bottomLine = gray.950
+padX = 6
+padY = 4
+
+[panel.status]
+fill = gray.800
+topLine = gray.950
+padX = 10
+padY = 3
+
+[panel.header]
+fill = gray.850
+bottomLine = gray.800
+padX = 8
+padY = 6
+
+[panel.pane]
+fill = gray.850
+
+[panel.popup]
+fill = gray.800
+border = gray.600
+borderWidth = 1
+radius = 6
+padX = 4
+padY = 4
+shadow = #00000070
+shadowBlur = 10
+shadowY = 4
+
+[popup]
+scrim = #00000060
+
+[tooltip]
+fill = gray.800
+border = gray.600
+text = gray.200
+shadow = #00000070
+
+[menu]
+text = gray.200
+textDisabled = gray.500
+keys = gray.400
+highlight = blue.600
+highlightText = white
+separator = gray.700
+
+[menubar]
+fill = gray.900
+text = gray.300
+hover = gray.750
+open = gray.700
+
+[scroll]
+thumb = #ffffff22
+thumbHover = #ffffff40
+width = 8
+
+[separator]
+color = gray.700
+
+[dock]
+background = gray.950
+tabBar = gray.800
+tabHover = gray.750
+tabActive = gray.850
+text = gray.400
+textActive = gray.100
+accent = blue.500
+splitter = gray.950
+splitterHover = blue.500
+border = gray.950
+window = gray.600
+shadow = #00000070
+drop = #3b82f640
+guide = gray.800
+guideBorder = gray.600
+size = 12
+
+[code]
+background = gray.850
+gutter = gray.800
+address = gray.400
+bytes = gray.500
+mnemonic = blue.400
+operand = gray.200
+pcRow = #f2b9501f
+pcArrow = amber.400
+hoverRow = #ffffff0a
+selectedRow = #3b82f62e
+breakpoint = red.500
+breakpointOff = gray.500
+changed = amber.400
+ascii = gray.300
+info = gray.200
+warn = amber.400
+error = red.400
+time = gray.500

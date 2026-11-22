@@ -1,0 +1,862 @@
+Raw output of bench.d, the runs report section 11.5 quotes.
+Built with: ldc2 -O3 -release -i -I. -I../../ddui/source -of=/tmp/bench bench.d
+ldc2 1.40.0 in a Podman container. Each path and size ran in its own process.
+
+== /tmp/bench (timings, run 1)
+# 2026-11-13, LDC 2.110, AMD Ryzen 9 5950X 16-Core Processor
+path    n  op            median us     p99 us    KiB/op
+A1      50  first           19.2       42.6        4.7
+A1      50  pointer         17.3       37.1        4.7
+A1      50  one hit         17.0       25.4        4.7
+A1      50  all hits        17.2       42.6        4.7
+A1      50  filter          17.0       32.0        3.0
+    GC collections: 47
+A2      50  first           62.9      247.4       60.0
+A2      50  pointer         59.1      233.7       56.5
+A2      50  one hit         64.0      285.3       56.5
+A2      50  all hits        62.5      269.2       56.5
+A2      50  filter          49.1      259.3       36.8
+    GC collections: 528
+D       50  first           86.4      260.1       85.0
+D       50  pointer         19.6      161.0       19.5
+D       50  one hit         21.7      161.5       20.5
+D       50  all hits        78.4      290.3       64.9
+D       50  filter          57.4      247.7       36.4
+    GC collections: 434
+B       50  first           55.9      240.2       78.8
+B       50  pointer          0.2        0.3        0.0
+B       50  one hit          1.3        1.5        0.1
+B       50  all hits        11.2       15.5        2.4
+B       50  filter          36.5      199.2       30.6
+B       50  repaint          1.2        2.7        3.3
+    GC collections: 253
+A1    1000  first          349.4     1248.5       93.8
+A1    1000  pointer        368.7      737.7       93.8
+A1    1000  one hit        337.1      387.7       93.8
+A1    1000  all hits       338.4      479.1       93.8
+A1    1000  filter         336.1      394.9       58.7
+    GC collections: 44
+A2    1000  first         1080.5     1788.2      894.3
+A2    1000  pointer       1061.4     3335.4      871.6
+A2    1000  one hit       1039.1     7477.0      871.0
+A2    1000  all hits      1087.0     9679.0      870.4
+A2    1000  filter         987.5     1836.2      548.2
+    GC collections: 27
+D     1000  first         1456.5     2184.5     1358.3
+D     1000  pointer        321.2     1052.8      122.8
+D     1000  one hit        306.6     1051.8      123.1
+D     1000  all hits      1498.9     7726.2     1036.3
+D     1000  filter        1168.3     4111.9      540.4
+    GC collections: 30
+B     1000  first         1034.7     2367.0     1433.3
+B     1000  pointer          3.0        3.4        0.0
+B     1000  one hit         19.8       25.2        0.1
+B     1000  all hits       223.2     1219.3       46.9
+B     1000  filter         756.0     2130.0      570.2
+B     1000  repaint         12.6      115.0       10.9
+    GC collections: 29
+A1   10000  first         3563.0     4392.7      937.6
+A1   10000  pointer       3573.9     3613.2      937.6
+A1   10000  one hit       3593.5     4337.7      937.6
+A1   10000  all hits      3583.1     4294.6      937.6
+A1   10000  filter        3514.9     4239.5      586.0
+    GC collections: 142
+A2   10000  first        11372.3    17898.1     9438.4
+A2   10000  pointer      11366.2    36040.7     8944.1
+A2   10000  one hit      12007.0    27037.9     8882.7
+A2   10000  all hits     12429.1    29729.8     8939.9
+A2   10000  filter       10452.5    37170.1     5623.7
+    GC collections: 23
+D    10000  first        18458.1    42441.0    14578.2
+D    10000  pointer       4152.2    10090.8     1474.7
+D    10000  one hit       4465.7    12489.4     1356.2
+D    10000  all hits     17212.6    48138.2    10502.3
+D    10000  filter       15087.7    24672.7     5877.5
+    GC collections: 22
+B    10000  first        14639.9    19605.5    14703.3
+B    10000  pointer         46.7       65.3        0.0
+B    10000  one hit        213.9      264.1        0.1
+B    10000  all hits      2620.5    14922.3      468.8
+B    10000  filter        9134.0    16802.9     6022.8
+B    10000  repaint        164.7      263.5       10.9
+    GC collections: 41
+C       30  scroll          49.8      105.6       13.0
+C       30  idle             0.0        0.0        0.0
+
+== /tmp/bench (timings, run 2)
+# 2026-11-13, LDC 2.110, AMD Ryzen 9 5950X 16-Core Processor
+path    n  op            median us     p99 us    KiB/op
+A1      50  first           17.2       41.7        4.7
+A1      50  pointer         17.0       27.6        4.7
+A1      50  one hit         17.0       27.8        4.7
+A1      50  all hits        17.1       41.0        4.7
+A1      50  filter          16.9       24.0        3.0
+    GC collections: 47
+A2      50  first           63.7      256.3       60.0
+A2      50  pointer         62.0      277.9       56.5
+A2      50  one hit         62.6      260.7       56.5
+A2      50  all hits        63.5      277.5       56.5
+A2      50  filter          49.8      261.4       36.8
+    GC collections: 528
+D       50  first           92.2      306.0       85.0
+D       50  pointer         20.7      155.0       19.5
+D       50  one hit         23.6      167.2       20.5
+D       50  all hits        84.0      337.6       64.9
+D       50  filter          55.7      282.7       36.4
+    GC collections: 434
+B       50  first           62.3      272.4       78.8
+B       50  pointer          0.1        0.2        0.0
+B       50  one hit          1.2        2.3        0.1
+B       50  all hits        10.9       15.1        2.4
+B       50  filter          34.9      197.5       30.6
+B       50  repaint          1.2        2.4        3.3
+    GC collections: 253
+A1    1000  first          336.1     1636.6       93.8
+A1    1000  pointer        343.2      528.3       93.8
+A1    1000  one hit        341.8      441.6       93.8
+A1    1000  all hits       340.7      465.1       93.8
+A1    1000  filter         340.2      447.1       58.7
+    GC collections: 44
+A2    1000  first         1039.5     4156.3      894.1
+A2    1000  pointer       1083.5     6127.3      872.3
+A2    1000  one hit       1059.0     4572.5      871.8
+A2    1000  all hits      1080.4     7888.3      873.9
+A2    1000  filter         985.5     2610.5      549.9
+    GC collections: 26
+D     1000  first         1503.4     2040.2     1358.3
+D     1000  pointer        323.6     1122.0      121.6
+D     1000  one hit        316.5     1123.9      122.9
+D     1000  all hits      1433.9     6375.7     1034.5
+D     1000  filter        1184.8     1876.9      539.9
+    GC collections: 30
+B     1000  first         1128.6     2870.7     1433.3
+B     1000  pointer          3.0        3.1        0.0
+B     1000  one hit         19.7       23.8        0.1
+B     1000  all hits       221.9      991.3       46.9
+B     1000  filter         734.4     1901.0      570.2
+B     1000  repaint         10.6      147.1       10.9
+    GC collections: 29
+A1   10000  first         3640.4     4611.3      937.6
+A1   10000  pointer       3745.3     4844.1      937.6
+A1   10000  one hit       3457.8     3979.9      937.6
+A1   10000  all hits      3481.3     4477.7      937.6
+A1   10000  filter        3347.9     3467.4      586.0
+    GC collections: 142
+A2   10000  first        11141.8    19969.2     9438.4
+A2   10000  pointer      11162.9    35368.9     8944.5
+A2   10000  one hit      11312.6    36819.3     9004.9
+A2   10000  all hits     11364.4    22512.1     8875.8
+A2   10000  filter       10590.3    19435.5     5538.1
+    GC collections: 23
+D    10000  first        19363.5    43339.1    14456.5
+D    10000  pointer       3245.5     8981.9     1454.2
+D    10000  one hit       3533.3     8782.6     1479.2
+D    10000  all hits     16702.0    52740.1    10538.2
+D    10000  filter       13154.6    43742.1     5854.2
+    GC collections: 23
+B    10000  first        13442.3    23583.6    14778.4
+B    10000  pointer         38.9       57.6        0.0
+B    10000  one hit        219.0      307.9        0.1
+B    10000  all hits      2351.7    16827.0      468.8
+B    10000  filter        8998.3    23759.0     6012.2
+B    10000  repaint        156.7      295.3       28.5
+    GC collections: 16
+C       30  scroll          48.7      110.2       13.0
+C       30  idle             0.0        0.0        0.0
+
+== /tmp/bench 1000 --DRT-gcopt=disable:1
+# 2026-11-13, LDC 2.110, AMD Ryzen 9 5950X 16-Core Processor
+# --DRT-gcopt=disable:1
+path    n  op            median us     p99 us    KiB/op
+A1    1000  first          335.1      580.8       93.8
+A1    1000  pointer        336.4      609.9       93.8
+A1    1000  one hit        338.3      491.0       93.8
+A1    1000  all hits       338.3      591.8       93.8
+A1    1000  filter         328.4      509.1       58.7
+    GC collections: 0
+A2    1000  first         1034.8     1476.2      894.8
+A2    1000  pointer       1088.1     1628.6      867.5
+A2    1000  one hit       1018.2     1321.3      867.5
+A2    1000  all hits      1050.2     1518.3      867.5
+A2    1000  filter         965.0     1171.2      546.7
+    GC collections: 0
+D     1000  first         1510.7     1995.5     1358.4
+D     1000  pointer        293.0      419.6      121.8
+D     1000  one hit        299.9      588.2      122.6
+D     1000  all hits      1447.5     2138.6     1031.7
+D     1000  filter        1185.4     1833.6      536.1
+    GC collections: 0
+B     1000  first         1102.2     2043.2     1434.8
+B     1000  pointer          3.0        5.7        0.0
+B     1000  one hit         20.1       28.9        0.1
+B     1000  all hits       230.9      498.3       46.9
+B     1000  filter         761.3     1376.4      568.9
+B     1000  repaint         12.1       48.4       10.7
+    GC collections: 0
+C       30  scroll          45.2      107.2       13.0
+C       30  idle             0.0        0.1        0.0
+
+== /tmp/bench mem (run 1)
+# 2026-11-13, LDC 2.110, AMD Ryzen 9 5950X 16-Core Processor
+path    n  model KiB     UI KiB  UI later  KiB/op   GCs  heap MiB  RSS MiB  peak MiB
+A1      50        2.0        0.0        0.0       3.0    11       1.0      3.0      4.7
+A2      50        2.2       44.3       44.3      36.8   149       5.0      3.1      6.7
+D       50        2.2       60.9       61.1      26.4    99       5.0      2.9      6.6
+B       50        9.9       65.7       66.5       8.0    31       1.0      3.0      4.6
+A1    1000       40.0        0.0        0.0      58.7    11       5.0      3.0      6.7
+A2    1000       40.2     1505.0     1846.4     548.8     8      22.0      3.1     26.2
+D     1000       40.2     1140.0     1829.5     338.8     5      22.0      3.0     26.2
+B     1000      195.5     1225.0     1236.6     150.0     3      12.0      3.0     13.9
+A1   10000      392.0        0.0        0.0     586.0    59       5.0      3.1      6.7
+A2   10000      392.2    15261.1    57703.3    5604.8     9     176.0      3.0    178.1
+D    10000      392.2    11916.7    18749.1    3576.6     6     176.0      3.0    184.2
+B    10000     1955.0    12748.0    12787.6    1580.5     3      70.0      3.0     67.5
+C       30     1028.2        4.9        5.1      13.0    13       5.0      3.1      6.8
+
+== /tmp/bench mem (run 2)
+# 2026-11-13, LDC 2.110, AMD Ryzen 9 5950X 16-Core Processor
+path    n  model KiB     UI KiB  UI later  KiB/op   GCs  heap MiB  RSS MiB  peak MiB
+A1      50        2.0        0.0        0.0       3.0    11       1.0      3.1      4.8
+A2      50        2.2       44.3       44.3      36.8   149       5.0      3.0      6.7
+D       50        2.2       60.9       61.1      26.4    99       5.0      3.0      6.7
+B       50        9.9       65.7       66.5       8.0    31       1.0      3.0      4.7
+A1    1000       40.0        0.0        0.0      58.7    11       5.0      3.0      6.7
+A2    1000       40.2     1505.0     2208.8     549.0     9      22.0      3.0     26.3
+D     1000       40.2     1140.0     1829.5     338.8     5      22.0      3.0     26.2
+B     1000      195.5     1225.0     1236.6     150.0     3      12.0      3.0     13.9
+A1   10000      392.0        0.0        0.0     586.0    59       5.0      3.0      6.7
+A2   10000      392.2     8501.0    21952.1    5578.3    10     117.0      3.0    123.9
+D    10000      392.2    11916.7    18749.1    3576.6     6     176.0      3.1    184.2
+B    10000     1955.0    12748.0    12787.6    1580.5     3      70.0      3.1     67.5
+C       30     1028.2        4.9        5.1      13.0    13       5.0      3.1      6.8
+
+== /tmp/bench mem (run 3)
+# 2026-11-13, LDC 2.110, AMD Ryzen 9 5950X 16-Core Processor
+path    n  model KiB     UI KiB  UI later  KiB/op   GCs  heap MiB  RSS MiB  peak MiB
+A1      50        2.0        0.0        0.0       3.0    11       1.0      3.0      4.7
+A2      50        2.2       44.3       44.3      36.8   149       5.0      3.0      6.7
+D       50        2.2       60.9       61.1      26.4    99       5.0      3.0      6.7
+B       50        9.9       65.7       66.5       8.0    31       1.0      2.9      4.6
+A1    1000       40.0        0.0        0.0      58.7    11       5.0      3.1      6.7
+A2    1000       40.2     1505.0     3549.1     549.0     9      22.0      2.9     26.2
+D     1000       40.2     1140.0     1829.5     338.8     5      22.0      3.0     26.2
+B     1000      195.5     1225.0     1236.6     150.0     3      12.0      3.0     13.9
+A1   10000      392.0        0.0        0.0     586.0    59       5.0      3.0      6.7
+A2   10000      392.2     8501.0    22118.5    5596.2     9     179.0      3.0    167.3
+D    10000      392.2    11916.7    18708.1    3567.7     6     176.0      3.1    178.1
+B    10000     1955.0    12748.0    12787.6    1580.5     3      70.0      3.0     67.4
+C       30     1028.2        4.9        5.1      13.0    13       5.0      3.0      6.8
+
+== /tmp/bench mem --DRT-gcopt=gc:precise (run 1)
+# 2026-11-13, LDC 2.110, AMD Ryzen 9 5950X 16-Core Processor
+# --DRT-gcopt=gc:precise
+path    n  model KiB     UI KiB  UI later  KiB/op   GCs  heap MiB  RSS MiB  peak MiB
+A1      50        2.0        0.0        0.0       3.0    11       1.0      3.1      4.8
+A2      50        2.2       44.3       44.3      36.8   149       5.0      3.0      6.7
+D       50        2.2       60.9       61.1      26.4    99       5.0      3.0      6.7
+B       50        9.9       65.7       66.5       8.0    31       1.0      3.0      4.6
+A1    1000       40.0        0.0        0.0      58.7    11       5.0      3.0      6.7
+A2    1000       40.2      832.3      832.3     547.7    13      12.0      2.9     14.0
+D     1000       40.2     1140.0     1140.8     339.1     5      22.0      3.1     26.5
+B     1000      195.5     1225.0     1236.6     150.0     3      12.0      3.1     14.1
+A1   10000      392.0        0.0        0.0     586.0    59       5.0      3.1      6.8
+A2   10000      392.2    15261.1    15293.2    5594.0    12     117.0      3.1    125.6
+D    10000      392.2    11916.7    11882.0    3545.8     6     176.0      3.0    173.2
+B    10000     1955.0    12748.0    12787.6    1580.5     3      70.0      3.0     68.4
+C       30     1028.2        4.9        5.1      13.0    13       5.0      3.1      6.8
+
+== /tmp/bench mem --DRT-gcopt=gc:precise (run 2)
+# 2026-11-13, LDC 2.110, AMD Ryzen 9 5950X 16-Core Processor
+# --DRT-gcopt=gc:precise
+path    n  model KiB     UI KiB  UI later  KiB/op   GCs  heap MiB  RSS MiB  peak MiB
+A1      50        2.0        0.0        0.0       3.0    11       1.0      3.1      4.8
+A2      50        2.2       44.3       44.3      36.8   149       5.0      3.1      6.8
+D       50        2.2       60.9       61.1      26.4    99       5.0      3.0      6.7
+B       50        9.9       65.7       66.5       8.0    31       1.0      3.1      4.8
+A1    1000       40.0        0.0        0.0      58.7    11       5.0      3.1      6.8
+A2    1000       40.2      832.3      832.4     548.3    13      12.0      3.0     14.1
+D     1000       40.2     1140.0     1140.8     339.1     5      22.0      3.0     26.5
+B     1000      195.5     1225.0     1236.6     150.0     3      12.0      2.9     14.0
+A1   10000      392.0        0.0        0.0     586.0    59       5.0      3.0      6.7
+A2   10000      392.2     8941.7     8973.8    5575.6    13     117.0      3.1    125.0
+D    10000      392.2    11916.7    11873.8    3571.2     6     151.0      3.1    160.1
+B    10000     1955.0    12748.0    12787.6    1580.5     3      70.0      3.0     68.4
+C       30     1028.2        4.9        5.1      13.0    13       5.0      3.0      6.8
+
+== /tmp/bench mem --DRT-gcopt=gc:precise (run 3)
+# 2026-11-13, LDC 2.110, AMD Ryzen 9 5950X 16-Core Processor
+# --DRT-gcopt=gc:precise
+path    n  model KiB     UI KiB  UI later  KiB/op   GCs  heap MiB  RSS MiB  peak MiB
+A1      50        2.0        0.0        0.0       3.0    11       1.0      3.0      4.7
+A2      50        2.2       44.3       44.3      36.8   149       5.0      3.0      6.7
+D       50        2.2       60.9       61.1      26.4    99       5.0      3.1      6.7
+B       50        9.9       65.7       66.5       8.0    31       1.0      3.0      4.7
+A1    1000       40.0        0.0        0.0      58.7    11       5.0      3.1      6.8
+A2    1000       40.2      832.3      832.3     547.4    13      12.0      3.1     14.0
+D     1000       40.2     1140.0     1140.8     339.1     5      22.0      3.1     26.6
+B     1000      195.5     1225.0     1236.6     150.0     3      12.0      2.9     14.0
+A1   10000      392.0        0.0        0.0     586.0    59       5.0      3.1      6.8
+A2   10000      392.2    15261.1    47495.5    5569.9    11      92.0      3.0     99.2
+D    10000      392.2    11916.7    11928.2    3563.6     6     151.0      3.0    152.1
+B    10000     1955.0    12748.0    12787.6    1580.5     3      70.0      3.1     68.5
+C       30     1028.2        4.9        5.1      13.0    13       5.0      2.9      6.7
+
+
+Re-run after report section 4.9 changed immediate.d: widgets as free functions,
+a fill or ink color in every draw command. Same session, old and new builds
+interleaved: before 1, after 1, before 2, after 2 and so on.
+"before" is a build of the previous immediate.d, "after" of the current one.
+
+== before (timings, run 1)
+# 2026-11-13, LDC 2.110, AMD Ryzen 9 5950X 16-Core Processor
+path    n  op            median us     p99 us    KiB/op
+A1      50  first           19.0       31.5        4.7
+A1      50  pointer         18.8       27.2        4.7
+A1      50  one hit         17.7       25.8        4.7
+A1      50  all hits        17.8       25.2        4.7
+A1      50  filter          17.6       19.0        3.0
+    GC collections: 47
+A2      50  first           59.9      233.7       60.0
+A2      50  pointer         58.3      246.6       56.5
+A2      50  one hit         59.1      254.9       56.5
+A2      50  all hits        57.8      246.2       56.5
+A2      50  filter          49.2      228.9       36.8
+    GC collections: 527
+D       50  first           85.0      273.7       85.0
+D       50  pointer         20.4      156.6       19.5
+D       50  one hit         21.8      157.2       20.5
+D       50  all hits        71.8      252.6       64.9
+D       50  filter          55.7      235.1       36.4
+    GC collections: 434
+B       50  first           54.5      232.7       78.8
+B       50  pointer          0.2        0.2        0.0
+B       50  one hit          1.4        2.3        0.1
+B       50  all hits        11.8       18.5        2.4
+B       50  filter          35.5      180.9       30.6
+B       50  repaint          1.3        2.4        3.3
+    GC collections: 253
+A1    1000  first          351.6     1281.2       93.8
+A1    1000  pointer        344.0      494.6       93.8
+A1    1000  one hit        367.0      442.5       93.8
+A1    1000  all hits       340.2      393.5       93.8
+A1    1000  filter         339.1      460.8       58.7
+    GC collections: 44
+A2    1000  first         1036.3     1409.8      894.3
+A2    1000  pointer        954.1     3064.3      871.6
+A2    1000  one hit        955.1     7349.0      870.8
+A2    1000  all hits      1075.6     4888.5      870.2
+A2    1000  filter         957.3     5536.4      550.5
+    GC collections: 27
+D     1000  first         1380.3     2394.6     1358.3
+D     1000  pointer        300.6      969.3      121.5
+D     1000  one hit        304.1     1117.7      123.8
+D     1000  all hits      1410.7     5323.2     1036.5
+D     1000  filter        1118.1     3019.5      538.7
+    GC collections: 33
+B     1000  first          945.0     2309.2     1433.3
+B     1000  pointer          3.1        3.2        0.0
+B     1000  one hit         20.4       32.3        0.1
+B     1000  all hits       228.3     1085.6       46.9
+B     1000  filter         692.6     2004.1      570.2
+B     1000  repaint         10.1      113.3       10.9
+    GC collections: 29
+A1   10000  first         3702.7     4243.9      937.6
+A1   10000  pointer       3493.5     4150.4      937.6
+A1   10000  one hit       3515.5     4494.8      937.6
+A1   10000  all hits      3767.2     4099.8      937.6
+A1   10000  filter        3445.1     3678.8      586.0
+    GC collections: 142
+A2   10000  first        10988.2    19126.7     9454.8
+A2   10000  pointer      11432.0    70656.3     8887.1
+A2   10000  one hit      10766.7    57887.5     8871.1
+A2   10000  all hits     11090.5    73210.3     8882.7
+A2   10000  filter       10011.6    13127.4     5631.8
+    GC collections: 18
+D    10000  first        16565.0    29868.4    14387.7
+D    10000  pointer       3205.8    13631.9     1425.5
+D    10000  one hit       3082.4    13916.6     1486.6
+D    10000  all hits     15605.9    56441.9    10525.0
+D    10000  filter       12622.8    40550.5     5854.2
+    GC collections: 22
+B    10000  first        11895.0    20780.6    14774.4
+B    10000  pointer         36.7       41.6        0.0
+B    10000  one hit        205.4      215.7        0.1
+B    10000  all hits      2257.5    12505.2      468.8
+B    10000  filter        8304.1    16617.9     6000.2
+B    10000  repaint        162.0      283.3       16.4
+    GC collections: 22
+C       30  scroll          43.3       87.0       13.0
+C       30  idle             0.0        0.0        0.0
+
+== after (timings, run 1)
+# 2026-11-13, LDC 2.110, AMD Ryzen 9 5950X 16-Core Processor
+path    n  op            median us     p99 us    KiB/op
+A1      50  first           16.9       41.9        4.7
+A1      50  pointer         16.7       27.7        4.7
+A1      50  one hit         16.7       27.3        4.7
+A1      50  all hits        16.9       25.5        4.7
+A1      50  filter          16.7       24.1        3.0
+    GC collections: 47
+A2      50  first           58.7      207.4       60.0
+A2      50  pointer         58.0      215.2       56.5
+A2      50  one hit         60.1      249.0       56.5
+A2      50  all hits        56.8      244.8       56.5
+A2      50  filter          48.3      252.0       37.5
+    GC collections: 531
+D       50  first           78.9      252.7       85.0
+D       50  pointer         17.8      136.9       19.5
+D       50  one hit         19.8      122.3       20.5
+D       50  all hits        72.6      236.4       64.9
+D       50  filter          53.0      228.6       37.0
+    GC collections: 416
+B       50  first           55.4      227.6       78.8
+B       50  pointer          0.1        0.3        0.0
+B       50  one hit          1.2        1.3        0.1
+B       50  all hits        10.9       11.8        2.4
+B       50  filter          34.5      173.7       30.6
+B       50  repaint          1.4        2.7        4.7
+    GC collections: 256
+A1    1000  first          323.9     4217.4       93.8
+A1    1000  pointer        349.7      495.6       93.8
+A1    1000  one hit        333.7      426.2       93.8
+A1    1000  all hits       335.5      585.5       93.8
+A1    1000  filter         335.2      385.9       58.7
+    GC collections: 44
+A2    1000  first          961.2     3626.1      902.1
+A2    1000  pointer        975.9     2543.7      871.4
+A2    1000  one hit        956.9     2333.4      878.3
+A2    1000  all hits      1004.1     4207.7      881.0
+A2    1000  filter         953.5     2598.6      550.5
+    GC collections: 32
+D     1000  first         1351.4     2645.6     1358.3
+D     1000  pointer        277.1     1048.7      125.8
+D     1000  one hit        278.5      992.4      128.7
+D     1000  all hits      1391.6     5440.5     1045.2
+D     1000  filter        1077.4     4477.3      544.9
+    GC collections: 34
+B     1000  first          907.0     2206.3     1433.3
+B     1000  pointer          3.0        3.1        0.0
+B     1000  one hit         20.3       32.9        0.1
+B     1000  all hits       230.6     1161.2       46.9
+B     1000  filter         714.4     2010.2      570.2
+B     1000  repaint         14.1      120.6       11.0
+    GC collections: 29
+A1   10000  first         3330.8     3888.9      937.6
+A1   10000  pointer       3340.7     3881.7      937.6
+A1   10000  one hit       3318.0     5243.3      937.6
+A1   10000  all hits      3366.0     4050.5      937.6
+A1   10000  filter        3307.0     3928.8      586.0
+    GC collections: 142
+A2   10000  first        11149.6    19949.5     9479.1
+A2   10000  pointer      10684.5    43859.1     9093.0
+A2   10000  one hit      10400.9    35971.3     9119.5
+A2   10000  all hits     10461.8    38395.5     8937.5
+A2   10000  filter        9898.3    32446.3     5543.5
+    GC collections: 25
+D    10000  first        16630.1    37634.0    14410.4
+D    10000  pointer       2755.1     9378.6     1422.6
+D    10000  one hit       2827.0     7383.6     1485.9
+D    10000  all hits     16764.9    55512.9    10561.6
+D    10000  filter       12544.1    24623.3     5918.6
+    GC collections: 23
+B    10000  first        13985.1    16457.7    14703.3
+B    10000  pointer         37.2       48.7        0.0
+B    10000  one hit        218.5      246.7        0.1
+B    10000  all hits      2372.3    13757.1      468.8
+B    10000  filter        8780.1    17051.3     6022.8
+B    10000  repaint        161.9      275.1       26.4
+    GC collections: 41
+C       30  scroll          44.5       94.9       13.0
+C       30  idle             0.0        0.0        0.0
+
+== before (timings, run 2)
+# 2026-11-13, LDC 2.110, AMD Ryzen 9 5950X 16-Core Processor
+path    n  op            median us     p99 us    KiB/op
+A1      50  first           18.1       32.6        4.7
+A1      50  pointer         17.6       23.2        4.7
+A1      50  one hit         17.7       30.9        4.7
+A1      50  all hits        17.8       23.9        4.7
+A1      50  filter          17.6       19.0        3.0
+    GC collections: 47
+A2      50  first           60.9      214.0       60.0
+A2      50  pointer         59.8      227.3       56.5
+A2      50  one hit         59.7      214.1       56.5
+A2      50  all hits        59.5      210.9       56.5
+A2      50  filter          51.6      199.4       36.8
+    GC collections: 548
+D       50  first           83.1      283.4       85.0
+D       50  pointer         19.1      147.8       19.5
+D       50  one hit         21.1      158.3       20.5
+D       50  all hits        75.0      276.7       64.9
+D       50  filter          54.7      273.6       36.4
+    GC collections: 437
+B       50  first           54.9      236.3       78.8
+B       50  pointer          0.2        0.3        0.0
+B       50  one hit          1.4        1.5        0.1
+B       50  all hits        11.3       16.6        2.4
+B       50  filter          37.4      199.7       30.6
+B       50  repaint          1.2        2.6        3.3
+    GC collections: 253
+A1    1000  first          325.9     1463.3       93.8
+A1    1000  pointer        325.6      377.8       93.8
+A1    1000  one hit        326.1      443.0       93.8
+A1    1000  all hits       341.5      471.6       93.8
+A1    1000  filter         339.2      392.8       58.7
+    GC collections: 44
+A2    1000  first          956.2     1515.3      894.3
+A2    1000  pointer       1000.0     3239.1      871.6
+A2    1000  one hit        986.2     7197.3      870.8
+A2    1000  all hits       985.9     5235.0      871.0
+A2    1000  filter         961.9     2775.2      550.2
+    GC collections: 27
+D     1000  first         1369.0     2167.6     1358.3
+D     1000  pointer        307.2     1074.0      121.6
+D     1000  one hit        306.6     1051.4      122.9
+D     1000  all hits      1376.8     6259.6     1034.5
+D     1000  filter        1114.2     1992.8      539.9
+    GC collections: 30
+B     1000  first          930.3     2227.1     1433.3
+B     1000  pointer          3.1        3.2        0.0
+B     1000  one hit         19.9       20.6        0.1
+B     1000  all hits       222.0     1027.0       46.9
+B     1000  filter         699.3     2020.8      570.2
+B     1000  repaint         10.0      115.9       10.9
+    GC collections: 29
+A1   10000  first         3409.4     4284.5      937.6
+A1   10000  pointer       3436.8     3516.6      937.6
+A1   10000  one hit       3458.6     4571.5      937.6
+A1   10000  all hits      3654.8     4364.6      937.6
+A1   10000  filter        3358.3     4221.7      586.0
+    GC collections: 142
+A2   10000  first        11081.9    20456.4     9438.4
+A2   10000  pointer      10688.6    38468.5     8948.7
+A2   10000  one hit      10480.7    28273.5     8925.3
+A2   10000  all hits     10410.6    24727.6     8909.5
+A2   10000  filter       10029.5    33080.4     5567.1
+    GC collections: 23
+D    10000  first        18073.5    42047.9    14443.7
+D    10000  pointer       3143.5    13159.9     1431.6
+D    10000  one hit       3003.4     8251.3     1402.8
+D    10000  all hits     15391.1    37451.9    10527.0
+D    10000  filter       12965.9    29017.1     5861.0
+    GC collections: 21
+B    10000  first        14640.8    17149.7    14703.3
+B    10000  pointer         36.8       61.6        0.0
+B    10000  one hit        205.1      247.8        0.1
+B    10000  all hits      2363.1    13357.5      468.8
+B    10000  filter        8551.8    16403.5     6022.8
+B    10000  repaint        158.2      265.3       10.9
+    GC collections: 41
+C       30  scroll          48.9       96.7       13.0
+C       30  idle             0.0        0.0        0.0
+
+== after (timings, run 2)
+# 2026-11-13, LDC 2.110, AMD Ryzen 9 5950X 16-Core Processor
+path    n  op            median us     p99 us    KiB/op
+A1      50  first           17.0       32.1        4.7
+A1      50  pointer         17.3       23.3        4.7
+A1      50  one hit         17.5       24.0        4.7
+A1      50  all hits        17.7       23.1        4.7
+A1      50  filter          17.5       18.3        3.0
+    GC collections: 47
+A2      50  first           62.0      241.6       60.0
+A2      50  pointer         61.0      255.7       56.5
+A2      50  one hit         59.4      215.6       56.5
+A2      50  all hits        62.7      240.9       56.5
+A2      50  filter          49.7      240.5       37.5
+    GC collections: 533
+D       50  first           82.4      266.3       85.0
+D       50  pointer         18.0      151.3       19.5
+D       50  one hit         18.6      129.0       20.5
+D       50  all hits        76.0      250.5       64.9
+D       50  filter          54.6      212.8       37.0
+    GC collections: 415
+B       50  first           53.7      228.2       78.8
+B       50  pointer          0.1        0.3        0.0
+B       50  one hit          1.5        1.6        0.1
+B       50  all hits        11.0       20.9        2.4
+B       50  filter          34.1      190.5       30.6
+B       50  repaint          1.4        2.9        4.7
+    GC collections: 256
+A1    1000  first          325.0     1281.0       93.8
+A1    1000  pointer        325.7      543.8       93.8
+A1    1000  one hit        325.5      374.1       93.8
+A1    1000  all hits       327.9      378.3       93.8
+A1    1000  filter         326.6      376.7       58.7
+    GC collections: 44
+A2    1000  first         1008.5     5159.3      902.1
+A2    1000  pointer        999.8     2744.8      871.4
+A2    1000  one hit        989.9     2391.6      878.3
+A2    1000  all hits      1010.8     4380.5      875.9
+A2    1000  filter         991.4     2515.2      550.9
+    GC collections: 31
+D     1000  first         1372.8     1965.1     1358.3
+D     1000  pointer        268.3     1136.1      125.8
+D     1000  one hit        272.5      995.9      128.7
+D     1000  all hits      1429.8     6742.3     1043.3
+D     1000  filter        1157.3     7022.7      542.7
+    GC collections: 31
+B     1000  first         1045.9     2486.7     1433.3
+B     1000  pointer          3.0        3.1        0.0
+B     1000  one hit         20.2       25.3        0.1
+B     1000  all hits       219.2     1126.5       46.9
+B     1000  filter         703.9     2113.7      570.2
+B     1000  repaint         10.2      112.6       11.0
+    GC collections: 29
+A1   10000  first         4044.7     4149.9      937.6
+A1   10000  pointer       4196.5     4890.7      937.6
+A1   10000  one hit       4248.4     4971.6      937.6
+A1   10000  all hits      4208.9     4903.4      937.6
+A1   10000  filter        4116.0     4240.9      586.0
+    GC collections: 142
+A2   10000  first        11458.2    17715.4     9479.1
+A2   10000  pointer      11420.6    63265.2     9123.5
+A2   10000  one hit      11040.8    51016.3     9054.7
+A2   10000  all hits     10562.4    55909.6     8851.1
+A2   10000  filter       10119.9    67891.3     5636.6
+    GC collections: 24
+D    10000  first        16837.4    31567.6    14410.4
+D    10000  pointer       4860.6     8339.6     1422.6
+D    10000  one hit       3292.6     6698.4     1485.9
+D    10000  all hits     17117.6    51557.0    10561.6
+D    10000  filter       12677.6    30535.9     5936.7
+    GC collections: 23
+B    10000  first        13311.0    23532.0    14773.6
+B    10000  pointer         39.3       55.0        0.0
+B    10000  one hit        211.6      265.6        0.1
+B    10000  all hits      2322.2    12764.3      468.8
+B    10000  filter        8528.3    16249.3     6001.6
+B    10000  repaint        155.3      261.1       24.8
+    GC collections: 22
+C       30  scroll          48.7      118.7       13.0
+C       30  idle             0.0        0.0        0.0
+
+== before (timings, run 3)
+# 2026-11-13, LDC 2.110, AMD Ryzen 9 5950X 16-Core Processor
+path    n  op            median us     p99 us    KiB/op
+A1      50  first           17.4       46.8        4.7
+A1      50  pointer         17.2       22.7        4.7
+A1      50  one hit         17.2       23.8        4.7
+A1      50  all hits        17.3       25.3        4.7
+A1      50  filter          17.5       23.8        3.0
+    GC collections: 47
+A2      50  first           61.6      211.2       60.0
+A2      50  pointer         60.0      236.2       56.5
+A2      50  one hit         57.5      208.4       56.5
+A2      50  all hits        59.1      227.8       56.5
+A2      50  filter          51.3      220.4       36.8
+    GC collections: 528
+D       50  first           82.6      263.3       85.0
+D       50  pointer         19.0      143.8       19.5
+D       50  one hit         19.4      145.7       20.5
+D       50  all hits        71.1      254.2       64.9
+D       50  filter          54.7      244.9       36.4
+    GC collections: 434
+B       50  first           54.2      230.1       78.8
+B       50  pointer          0.1        0.2        0.0
+B       50  one hit          1.2        1.4        0.1
+B       50  all hits        11.0       17.7        2.4
+B       50  filter          34.4      179.6       30.6
+B       50  repaint          1.0        2.0        3.3
+    GC collections: 253
+A1    1000  first          349.9     1315.4       93.8
+A1    1000  pointer        336.4      602.3       93.8
+A1    1000  one hit        335.8      537.9       93.8
+A1    1000  all hits       338.8      494.6       93.8
+A1    1000  filter         330.8      475.4       58.7
+    GC collections: 44
+A2    1000  first         1006.5     1451.6      894.3
+A2    1000  pointer        965.5     2930.2      871.6
+A2    1000  one hit        977.5     7538.1      870.8
+A2    1000  all hits       992.8     5169.5      871.0
+A2    1000  filter         974.0     2949.2      549.0
+    GC collections: 27
+D     1000  first         1432.8     2349.6     1358.3
+D     1000  pointer        300.7      957.4      121.6
+D     1000  one hit        308.0      929.4      122.9
+D     1000  all hits      1364.7     6209.4     1034.5
+D     1000  filter        1149.7     1986.4      539.9
+    GC collections: 30
+B     1000  first          992.2     2249.1     1433.3
+B     1000  pointer          3.3        3.5        0.0
+B     1000  one hit         22.1       42.2        0.1
+B     1000  all hits       248.8     1122.9       46.9
+B     1000  filter         697.9     1908.9      570.2
+B     1000  repaint         10.2      114.3       10.9
+    GC collections: 29
+A1   10000  first         3735.8     6225.7      937.6
+A1   10000  pointer       3503.3     4486.4      937.6
+A1   10000  one hit       3512.0     4232.3      937.6
+A1   10000  all hits      3524.5     4062.4      937.6
+A1   10000  filter        3465.2     3764.9      586.0
+    GC collections: 142
+A2   10000  first        10920.9    15996.4     9454.8
+A2   10000  pointer      12392.0    68474.8     8887.1
+A2   10000  one hit      12447.5    58805.3     8871.1
+A2   10000  all hits     11395.1    73006.2     8882.7
+A2   10000  filter       10445.5    15517.4     5631.8
+    GC collections: 18
+D    10000  first        18163.3    34402.2    14443.7
+D    10000  pointer       3731.5    14273.8     1431.6
+D    10000  one hit       3652.9     9180.7     1410.7
+D    10000  all hits     18120.5    53820.6    10499.6
+D    10000  filter       15972.4    33684.6     5859.8
+    GC collections: 20
+B    10000  first        14450.4    25003.7    14773.6
+B    10000  pointer         45.0       46.2        0.0
+B    10000  one hit        213.5      314.0        0.1
+B    10000  all hits      2327.3    13211.1      468.8
+B    10000  filter        9862.2    18642.1     6001.6
+B    10000  repaint        166.3      268.5       28.0
+    GC collections: 22
+C       30  scroll          43.6       92.7       13.0
+C       30  idle             0.0        0.0        0.0
+
+== after (timings, run 3)
+# 2026-11-13, LDC 2.110, AMD Ryzen 9 5950X 16-Core Processor
+path    n  op            median us     p99 us    KiB/op
+A1      50  first           16.9       32.3        4.7
+A1      50  pointer         16.9       27.9        4.7
+A1      50  one hit         17.1       32.6        4.7
+A1      50  all hits        17.1       51.1        4.7
+A1      50  filter          16.8       28.0        3.0
+    GC collections: 47
+A2      50  first           59.7      196.6       60.0
+A2      50  pointer         59.4      233.7       56.5
+A2      50  one hit         61.7      241.2       56.5
+A2      50  all hits        59.0      229.2       56.5
+A2      50  filter          48.6      243.9       37.5
+    GC collections: 535
+D       50  first           90.6      269.4       85.0
+D       50  pointer         19.3      157.3       19.5
+D       50  one hit         18.7      165.3       20.5
+D       50  all hits        81.0      272.4       64.9
+D       50  filter          54.7      231.8       37.0
+    GC collections: 431
+B       50  first           55.9      245.1       78.8
+B       50  pointer          0.2        0.5        0.0
+B       50  one hit          1.4        2.0        0.1
+B       50  all hits        12.1       22.4        2.4
+B       50  filter          39.6      191.5       30.6
+B       50  repaint          1.3        3.2        4.7
+    GC collections: 256
+A1    1000  first          364.0     1535.0       93.8
+A1    1000  pointer        337.7      452.5       93.8
+A1    1000  one hit        347.4      494.2       93.8
+A1    1000  all hits       339.6      396.2       93.8
+A1    1000  filter         338.2      389.0       58.7
+    GC collections: 44
+A2    1000  first         1054.3     3997.3      902.1
+A2    1000  pointer       1010.1     2461.1      871.4
+A2    1000  one hit       1062.1     2611.9      878.2
+A2    1000  all hits      1065.4     4895.8      876.6
+A2    1000  filter        1016.1     2024.9      549.5
+    GC collections: 30
+D     1000  first         1501.6     2282.1     1358.3
+D     1000  pointer        319.8     1224.0      125.8
+D     1000  one hit        302.3     1057.9      128.7
+D     1000  all hits      1561.1     5491.9     1042.1
+D     1000  filter        1178.8     2572.4      536.2
+    GC collections: 30
+B     1000  first         1093.1     2600.6     1433.3
+B     1000  pointer          4.9        5.2        0.0
+B     1000  one hit         22.8       41.8        0.1
+B     1000  all hits       230.7     1091.8       46.9
+B     1000  filter         724.2     1951.4      570.2
+B     1000  repaint         11.2      120.0       11.0
+    GC collections: 29
+A1   10000  first         3549.5     4201.8      937.6
+A1   10000  pointer       3542.0     3876.6      937.6
+A1   10000  one hit       3659.0     4317.4      937.6
+A1   10000  all hits      3709.9     4457.8      937.6
+A1   10000  filter        3483.9     4314.8      586.0
+    GC collections: 142
+A2   10000  first        11997.9    19399.7     9479.1
+A2   10000  pointer      11188.7    46750.4     9093.0
+A2   10000  one hit      10747.0    57736.2     9123.3
+A2   10000  all hits     10991.5    25580.4     8864.2
+A2   10000  filter       10503.3    29872.6     5638.7
+    GC collections: 24
+D    10000  first        17757.3    33081.4    14410.4
+D    10000  pointer       3071.1     9317.5     1422.6
+D    10000  one hit       2930.9     7719.1     1485.9
+D    10000  all hits     18648.2    46236.4    10591.0
+D    10000  filter       13847.6    36150.3     5937.3
+    GC collections: 23
+B    10000  first        15433.7    18127.9    14703.3
+B    10000  pointer         37.1       46.0        0.0
+B    10000  one hit        239.7      282.1        0.1
+B    10000  all hits      2311.1    14052.5      468.8
+B    10000  filter        8389.1    16915.8     6022.8
+B    10000  repaint        157.5      261.0       26.4
+    GC collections: 41
+C       30  scroll          43.5       94.6       13.0
+C       30  idle             0.0        0.0        0.0
+
+== before mem (run 1)
+# 2026-11-13, LDC 2.110, AMD Ryzen 9 5950X 16-Core Processor
+path    n  model KiB     UI KiB  UI later  KiB/op   GCs  heap MiB  RSS MiB  peak MiB
+A1      50        2.0        0.0        0.0       3.0    11       1.0      3.1      4.7
+A2      50        2.2       44.3       44.3      36.8   149       5.0      3.1      6.8
+D       50        2.2       60.9       61.1      26.4    99       5.0      3.0      6.7
+B       50        9.9       65.7       66.5       8.0    31       1.0      3.0      4.6
+A1    1000       40.0        0.0        0.0      58.7    11       5.0      3.1      6.8
+A2    1000       40.2     1505.0     2208.8     549.0     9      22.0      3.1     26.3
+D     1000       40.2     1140.0     1829.5     338.8     5      22.0      3.0     26.2
+B     1000      195.5     1225.0     1236.6     150.0     3      12.0      3.1     13.9
+A1   10000      392.0        0.0        0.0     586.0    59       5.0      3.0      6.7
+A2   10000      392.2     8501.0    21952.1    5578.3    10     117.0      3.1    123.9
+D    10000      392.2    11916.7    18807.3    3564.8     6     145.0      3.0    146.1
+B    10000     1955.0    12748.0    12787.6    1580.5     3      70.0      3.0     67.4
+C       30     1028.2        4.9        5.1      13.0    13       5.0      3.0      6.8
+
+== after mem (run 1)
+# 2026-11-13, LDC 2.110, AMD Ryzen 9 5950X 16-Core Processor
+path    n  model KiB     UI KiB  UI later  KiB/op   GCs  heap MiB  RSS MiB  peak MiB
+A1      50        2.0        0.0        0.0       3.0    11       1.0      3.0      4.7
+A2      50        2.2       48.3       48.3      37.5   149       5.0      3.1      6.7
+D       50        2.2       65.0       65.2      27.1   110       5.0      3.0      6.7
+B       50        9.9       65.7       66.5       8.0    31       1.0      2.9      4.6
+A1    1000       40.0        0.0        0.0      58.7    11       5.0      3.0      6.7
+A2    1000       40.2     1505.0     1002.8     551.8     9      22.0      3.0     26.3
+D     1000       40.2     1140.0     1141.6     347.3     5      22.0      3.0     26.2
+B     1000      195.5     1225.0     1236.6     150.0     3      12.0      3.1     14.0
+A1   10000      392.0        0.0        0.0     586.0    59       5.0      3.1      6.8
+A2   10000      392.2     8673.0     8894.6    5675.0    11     176.0      3.0    185.0
+D    10000      392.2    12280.8    19179.7    3612.2     6     145.0      3.0    150.1
+B    10000     1955.0    12748.0    12787.6    1580.5     3      70.0      3.1     67.5
+C       30     1028.2        4.9        5.1      13.0    13       5.0      3.1      6.9
+
+== before mem (run 2)
+# 2026-11-13, LDC 2.110, AMD Ryzen 9 5950X 16-Core Processor
+path    n  model KiB     UI KiB  UI later  KiB/op   GCs  heap MiB  RSS MiB  peak MiB
+A1      50        2.0        0.0        0.0       3.0    11       1.0      3.1      4.8
+A2      50        2.2       44.3       44.3      36.8   149       5.0      3.1      6.7
+D       50        2.2       60.9       61.1      26.4    99       5.0      3.1      6.7
+B       50        9.9       65.7       66.5       8.0    31       1.0      3.0      4.7
+A1    1000       40.0        0.0        0.0      58.7    11       5.0      3.0      6.7
+A2    1000       40.2     1505.0      832.3     549.4    12      22.0      3.1     26.3
+D     1000       40.2     1140.0     1829.5     338.8     5      22.0      3.0     26.2
+B     1000      195.5     1225.0     1236.6     150.0     3      12.0      2.9     13.8
+A1   10000      392.0        0.0        0.0     586.0    59       5.0      3.0      6.7
+A2   10000      392.2     8501.0    21952.1    5578.3    10     117.0      3.1    123.9
+D    10000      392.2    11916.7    18749.1    3576.6     6     176.0      3.0    184.2
+B    10000     1955.0    12748.0    12787.6    1580.5     3      70.0      2.9     67.4
+C       30     1028.2        4.9        5.1      13.0    13       5.0      3.0      6.8
+
+== after mem (run 2)
+# 2026-11-13, LDC 2.110, AMD Ryzen 9 5950X 16-Core Processor
+path    n  model KiB     UI KiB  UI later  KiB/op   GCs  heap MiB  RSS MiB  peak MiB
+A1      50        2.0        0.0        0.0       3.0    11       1.0      3.0      4.7
+A2      50        2.2       48.3       48.3      37.5   149       5.0      3.0      6.7
+D       50        2.2       65.0       65.2      27.1   109       5.0      3.1      6.8
+B       50        9.9       65.7       66.5       8.0    31       1.0      3.1      4.8
+A1    1000       40.0        0.0        0.0      58.7    11       5.0      3.1      6.8
+A2    1000       40.2     1505.0      832.3     549.8     7      22.0      3.1     26.3
+D     1000       40.2     1140.0     1141.5     343.2     5      22.0      3.1     26.3
+B     1000      195.5     1225.0     1236.6     150.0     3      12.0      3.1     14.0
+A1   10000      392.0        0.0        0.0     586.0    59       5.0      3.0      6.7
+A2   10000      392.2     8673.0     9034.1    5685.6    11     176.0      3.1    185.0
+D    10000      392.2    12280.8    32647.0    3598.7     6     145.0      3.1    152.1
+B    10000     1955.0    12748.0    12787.6    1580.5     3      70.0      3.0     67.5
+C       30     1028.2        4.9        5.1      13.0    13       5.0      3.0      6.8

@@ -1,0 +1,5 @@
+name "dentrite-debugger"
+description "Debugger-shaped dentrite example"
+targetType "executable"
+targetPath "bin"
+dependency "dentrite" path="../.."

@@ -1,0 +1,1177 @@
+/// Window contents without a window system: tree, input routing, focus, frame scheduling.
+///
+/// No frame runs unless something asked for one: input, a node change, a timer or
+/// a wake from another thread. A frame drains the app's hooks, relays out dirty
+/// boundaries, runs dirty islands, composes the layers (recording and tessellating
+/// the stale ones), renders and presents.
+module dentrite.host;
+
+import core.memory : GC;
+import core.time : Duration, MonoTime;
+import dentrite.access;
+import dentrite.containers : PanelStyle, ScrollStyle, SeparatorStyle, scrollIntoView;
+import dentrite.dock : DockStyle;
+import dentrite.draw;
+import dentrite.island : IslandStyle;
+import dentrite.loop : FrameClock;
+import dentrite.node;
+import dentrite.overlay : Popup, PopupStyle;
+import dentrite.platform;
+import dentrite.png : encodePNG;
+import dentrite.text;
+import dentrite.theme : Theme;
+import dentrite.widgets.button : ButtonStyle;
+import dentrite.widgets.checkbox : CheckboxStyle;
+import dentrite.widgets.label : TextStyle;
+import dentrite.widgets.list : ListStyle;
+import dentrite.widgets.combobox : ComboBoxStyle;
+import dentrite.widgets.dialog : DialogStyle;
+import dentrite.widgets.menu : MenuBarStyle, MenuStyle;
+import dentrite.widgets.progress : ProgressStyle;
+import dentrite.widgets.radio : RadioStyle;
+import dentrite.widgets.slider : SliderStyle;
+import dentrite.widgets.spinbox : SpinBoxStyle;
+import dentrite.widgets.table : TableStyle;
+import dentrite.widgets.tabs : TabsStyle;
+import dentrite.widgets.textarea : TextAreaStyle;
+import dentrite.widgets.textbox : TextBoxStyle;
+import dentrite.widgets.tooltip : TooltipStyle, Tooltips;
+import dentrite.widgets.tree : TreeStyle;
+import std.algorithm.comparison : min;
+import std.meta : AliasSeq;
+import std.stdio : stderr;
+import std.utf : stride;
+
+/// Look of the window itself.
+struct WindowStyle
+{
+    enum section = "window"; /// section name in theme files
+    Color background = Color(0x1b, 0x1b, 0x1e, 0xff); /// window background, the color each frame clears to
+}
+
+/// Style structs of the library, checked when a theme loads.
+alias LibraryStyles = AliasSeq!(WindowStyle, TextStyle, ButtonStyle, CheckboxStyle, TextBoxStyle, ListStyle,
+    PanelStyle, ScrollStyle, SeparatorStyle, DockStyle, PopupStyle, MenuStyle, MenuBarStyle, ComboBoxStyle,
+    TooltipStyle, RadioStyle, SliderStyle, ProgressStyle, TabsStyle, SpinBoxStyle, TreeStyle, TableStyle,
+    DialogStyle, TextAreaStyle, IslandStyle);
+
+/// Timings and sizes of the last frame.
+struct FrameStats
+{
+    ulong frames;        /// frames rendered so far
+    Duration layout;     /// time relaying out dirty boundaries
+    Duration islands;    /// time in island passes
+    Duration paint;      /// time recording stale layers
+    Duration tessellate; /// time tessellating stale layers
+    Duration compose;    /// time building the frame's batches from the layers
+    Duration render;     /// time in the renderer
+    Duration total;      /// time for the whole frame before presenting
+    size_t commands;     /// draw commands recorded
+    int layersRecorded;  /// layers painted and tessellated
+    int layersReused;    /// layers copied from their cache
+    size_t vertices;     /// vertices of the layers drawn
+    size_t meshBytes;    /// vertex and index bytes of those layers
+    size_t batches;      /// draw batches sent to the renderer
+    int boundaries;      /// relayout boundaries laid out
+    int islandPasses;    /// islands that ran a pass
+}
+
+/// Retained UI on a platform and a renderer. One per process for now.
+class Host : Services
+{
+    Tree tree;            /// retained node tree
+    TextSystem text;      /// text system: fonts, shaping and the glyph atlas
+    Theme theme;          /// current theme
+    FrameStats stats;     /// timings of the last frame
+    bool running = true;  /// set to false to make `run` return after the current frame
+    /// App work at frame start, such as draining mailboxes. Changes made here show in the same frame, so they do
+    /// not ask for another.
+    void delegate()[] beforeFrame;
+    string screenshotPath; /// PNG file written after the next frame, then cleared
+    Platform platform;    /// window system side, see `Platform`
+    Renderer renderer;    /// renderer drawing the frames
+    Tooltips tooltips;    /// tooltip of the node under the pointer
+    AccessTree access;    /// what assistive technologies were last told
+
+    private WindowOptions opts;     /// settings
+    private FrameMesh mesh;         /// tessellated frame
+    private Compositor compositor;  /// layers to frame mesh
+    private FrameClock clock;       /// frame requests and cap
+    private float scale = 1;        /// physical pixels per logical pixel
+    private int pixelW;             /// framebuffer width
+    private int pixelH;             /// framebuffer height
+    private Node hoverNode;         /// node under the pointer
+    private Node captureNode;       /// node that saw the press
+    private bool sliding;           /// the held press let go of its node, see `slidePress`
+    private Node focusNode;         /// keyboard focus
+    private bool revealFocus;       /// scroll the focused node into view after the next layout
+    private Point mouse;            /// pointer, logical
+    private bool pointerIn;         /// pointer is over the window
+    private MonoTime frameTime;     /// start of the current frame
+    private CursorShape cursorShown; /// cursor last set on the platform
+    private bool textInputOn;       /// platform text input enabled
+    private string composing;       /// input method text not committed yet
+    private Rect inputArea;         /// caret last given to the input method
+    private bool keyboardFocus;     /// focus last moved by Tab
+    private bool closed;            /// `close` already ran
+    private AccessAdapter accessAdapter; /// platform side when `WindowOptions.accessibility` is set
+    private ulong accessFocus;      /// focus id last sent to the adapter
+    private AccessTree lookup;      /// description for `find`, apart from what the adapter was sent
+
+    /// Takes over `p` and `r`, loads fonts and the theme.
+    this(Platform p, Renderer r, WindowOptions o)
+    {
+        import std.file : readText;
+
+        platform = p;
+        renderer = r;
+        opts = o;
+        text = new TextSystem(o.fonts, o.fallbackFonts ~ (o.systemFallbacks ? systemFallbackFonts() : null));
+        if (o.themePath.length > 0)
+        {
+            theme = new Theme(readText(o.themePath), o.themePath);
+            check(theme);
+        }
+        tree = new Tree(text, theme, this);
+        tooltips = new Tooltips(tree);
+        access = new AccessTree;
+        access.title = o.title;
+        if (o.accessibility)
+        {
+            accessAdapter = cast(AccessAdapter) p;
+        }
+        mesh = new FrameMesh;
+        compositor.cache = o.cachePaint;
+        clock = FrameClock(o.maxFps);
+        updateSize();
+    }
+
+    /// Closes the window unless the GC is finalizing it, so `scope Window w = new Window(o)` cleans up.
+    /// NOTE: a GC finalizer may run on any thread after the platform is gone, so it leaks instead.
+    ~this()
+    {
+        if (GC.inFinalizer == false)
+        {
+            close();
+        }
+    }
+
+    /// Frees the renderer, fonts and the platform. Safe to call twice.
+    void close()
+    {
+        if (closed)
+        {
+            return;
+        }
+        closed = true;
+        renderer.dispose();
+        text.dispose();
+        platform.close();
+    }
+
+    /// Sets the app's root node. Open popups stay open.
+    void setRoot(Node root)
+    {
+        tree.setRoot(root);
+    }
+
+    /// Reads the framebuffer size and the scale.
+    private void updateSize()
+    {
+        Metrics m = platform.metrics();
+        pixelW = m.pixelW;
+        pixelH = m.pixelH;
+        float s = opts.scale > 0 ? opts.scale : m.scale;
+        if (s <= 0)
+        {
+            s = 1;
+        }
+        if (s != scale || text.ppp != s)
+        {
+            scale = s;
+            text.setScale(s);
+            tree.restyle();
+        }
+        tree.viewport = Size(pixelW / scale, pixelH / scale);
+        requestFrame();
+    }
+
+    // Services
+
+    /// Asks for a frame as soon as the frame cap allows.
+    void requestFrame()
+    {
+        clock.request();
+    }
+
+    /// Asks for a frame at `t`.
+    void requestFrameAt(MonoTime t)
+    {
+        clock.requestAt(t);
+    }
+
+    /// Moves keyboard focus to `n`, or clears it.
+    void setFocus(Node n)
+    {
+        if (n is focusNode)
+        {
+            return;
+        }
+        Node old = focusNode;
+        focusNode = n;
+        inputArea = Rect.init;
+        if (composing.length > 0)
+        {
+            endComposition(old);
+            if (textInputOn)
+            {
+                textInputOn = false;
+                platform.textInput(false);
+            }
+        }
+        if (old !is null)
+        {
+            old.focused = false;
+            old.markNeedsPaint();
+            old.onFocus(false);
+        }
+        if (n !is null)
+        {
+            n.focused = true;
+            n.markNeedsPaint();
+            n.onFocus(true);
+        }
+        bool wantText = n !is null && n.textInput;
+        if (wantText != textInputOn)
+        {
+            textInputOn = wantText;
+            platform.textInput(wantText);
+        }
+        requestFrame();
+    }
+
+    /// Clears the composition `n` shows, if it is a `Composer`.
+    private void endComposition(Node n)
+    {
+        composing = null;
+        Composer c = cast(Composer) n;
+        if (c !is null)
+        {
+            c.compose(null, 0, 0);
+        }
+    }
+
+    /// Hands input method text to the focused node, with SDL style code point `start` and `length` turned into
+    /// bytes.
+    private void compose(string s, int start, int length)
+    {
+        composing = s;
+        Composer c = cast(Composer) focusNode;
+        if (c is null)
+        {
+            return;
+        }
+        size_t from = start < 0 ? s.length : byteOffset(s, start);
+        size_t to = length <= 0 ? from : byteOffset(s, start + length);
+        c.compose(s.length == 0 ? null : s, from, to);
+        requestFrame();
+    }
+
+    /// Node with keyboard focus.
+    Node focused()
+    {
+        return focusNode;
+    }
+
+    /// Clipboard text.
+    string clipboard()
+    {
+        return platform.clipboard();
+    }
+
+    /// Sets the clipboard.
+    void setClipboard(string s)
+    {
+        platform.setClipboard(s);
+    }
+
+    /// True if focus last moved by keyboard.
+    bool focusVisible()
+    {
+        return keyboardFocus;
+    }
+
+    /// Sets whether focus last moved by keyboard, repainting the focused node when its ring changes.
+    private void setKeyboardFocus(bool on)
+    {
+        if (on != keyboardFocus && focusNode !is null)
+        {
+            focusNode.markNeedsPaint();
+        }
+        keyboardFocus = on;
+    }
+
+    /// Drops hover, capture and focus held by `n`, which is leaving the tree.
+    void forget(Node n)
+    {
+        if (n is hoverNode)
+        {
+            n.hovered = false;
+            hoverNode = null;
+        }
+        if (n is captureNode)
+        {
+            n.pressed = false;
+            captureNode = null;
+        }
+        if (n is focusNode)
+        {
+            setFocus(null);
+        }
+    }
+
+    /// Start of the current frame.
+    MonoTime now()
+    {
+        return frameTime == MonoTime.init ? MonoTime.currTime : frameTime;
+    }
+
+    // Loop
+
+    /// Runs frames until `running` is set to false or the window closes.
+    void run()
+    {
+        while (running)
+        {
+            Event e;
+            if (platform.wait(e, clock.timeout(MonoTime.currTime)))
+            {
+                handle(e);
+                while (platform.wait(e, Duration.zero))
+                {
+                    handle(e);
+                }
+            }
+            if (clock.due(MonoTime.currTime))
+            {
+                frame();
+            }
+        }
+    }
+
+    /// Handles the platform events waiting now, without blocking, for loops of their own such as scripted runs.
+    void pump()
+    {
+        Event e;
+        while (platform.wait(e, Duration.zero))
+        {
+            handle(e);
+        }
+    }
+
+    /// One frame: hooks, layout, islands, compose, render, present.
+    void frame()
+    {
+        frameTime = MonoTime.currTime;
+        clock.started(frameTime);
+        foreach (void delegate() hook; beforeFrame)
+        {
+            hook();
+        }
+        tree.firePaintTimers(frameTime);
+        tooltips.tick(frameTime);
+        clock.requested = false;
+        MonoTime t0 = MonoTime.currTime;
+        tree.flush();
+        int boundaries = tree.boundaryLayouts;
+        if (revealFocus && focusNode !is null && focusNode.tree is tree)
+        {
+            FocusScope inner = cast(FocusScope) focusNode;
+            scrollIntoView(focusNode, inner is null ? focusNode.bounds : inner.focusRect);
+        }
+        revealFocus = false;
+        MonoTime t1 = MonoTime.currTime;
+        foreach (int round; 0 .. 2)
+        {
+            foreach (Updatable u; tree.updaters.dup)
+            {
+                u.update();
+            }
+            if (tree.needsLayout == false)
+            {
+                break;
+            }
+            tree.flush();
+            boundaries += tree.boundaryLayouts;
+        }
+        if (pointerIn && captureNode is null)
+        {
+            setHover(interactiveAt(mouse));
+            if (sliding == false)
+            {
+                tooltips.pointer(reachableAt(mouse), mouse);
+            }
+        }
+        MonoTime t2 = MonoTime.currTime;
+        compositor.tess.ppp = scale;
+        compositor.tess.text = text;
+        compositor.compose(tree.root.paintLayer, mesh, pixelW, pixelH);
+        tree.paintRequested = false;
+        placeInputArea();
+        updateAccess();
+        MonoTime t4 = MonoTime.currTime;
+        Color clear = tree.style!WindowStyle().background;
+        renderer.render(mesh, text.atlas, clear);
+        MonoTime t5 = MonoTime.currTime;
+        if (screenshotPath.length > 0)
+        {
+            import std.file : write;
+
+            write(screenshotPath, encodePNG(renderer.readPixels(), pixelW, pixelH));
+            stderr.writeln("dentrite: wrote ", screenshotPath);
+            screenshotPath = null;
+        }
+        platform.present();
+        text.endFrame();
+        if (mesh.missedGlyphs)
+        {
+            requestFrame();
+        }
+        stats.frames += 1;
+        stats.layout = t1 - t0;
+        stats.islands = t2 - t1;
+        stats.paint = compositor.painting;
+        stats.tessellate = compositor.tessellating;
+        stats.compose = t4 - t2 - compositor.painting - compositor.tessellating;
+        stats.render = t5 - t4;
+        stats.total = t5 - frameTime;
+        stats.commands = compositor.commands;
+        stats.layersRecorded = compositor.recorded;
+        stats.layersReused = compositor.reused;
+        stats.vertices = compositor.vertices;
+        stats.meshBytes = compositor.meshBytes;
+        stats.batches = mesh.batches.length;
+        stats.boundaries = boundaries;
+    }
+
+    /// Tells the platform where the focused node's caret is, if it changed since last time.
+    private void placeInputArea()
+    {
+        if (textInputOn == false || focusNode is null || focusNode.tree !is tree)
+        {
+            return;
+        }
+        Composer c = cast(Composer) focusNode;
+        Rect at = c is null ? focusNode.bounds : c.caretRect;
+        if (at != inputArea)
+        {
+            inputArea = at;
+            platform.textInputArea(Rect(at.x * scale, at.y * scale, at.w * scale, at.h * scale));
+        }
+    }
+
+    /// Sends the adapter what changed in the tree, while an assistive technology listens.
+    private void updateAccess()
+    {
+        if (accessAdapter is null)
+        {
+            return;
+        }
+        AccessDemand d = accessAdapter.demand();
+        if (d == AccessDemand.none)
+        {
+            return;
+        }
+        AccessUpdate u = access.update(tree, focusNode, d == AccessDemand.full);
+        if (u.full || u.nodes.length > 0 || u.focus != accessFocus)
+        {
+            accessFocus = u.focus;
+            accessAdapter.update(u, scale);
+        }
+    }
+
+    /// Runs what an assistive technology asked for: focus and scrolling here, the rest by the node or the
+    /// `AccessActions` node holding it.
+    private void runAccess(ref const AccessRequest r)
+    {
+        Node n = access.nodeOf(r.target);
+        if (n is null || n.tree is null)
+        {
+            return;
+        }
+        ptrdiff_t part = access.partOf(r.target);
+        AccessParts parts = cast(AccessParts) n;
+        if (part >= 0 && parts !is null)
+        {
+            if (r.action == AccessAction.focus && n.focusable)
+            {
+                setKeyboardFocus(true);
+                setFocus(n);
+            }
+            parts.accessPartAction(part, r);
+        }
+        else if (r.action == AccessAction.focus && n.focusable)
+        {
+            setKeyboardFocus(true);
+            setFocus(n);
+            revealFocus = true;
+        }
+        else if (r.action == AccessAction.scrollIntoView)
+        {
+            scrollIntoView(n, n.bounds);
+        }
+        else if (n.accessAction(r) == false)
+        {
+            if (AccessActions h = access.handlerOf(r.target))
+            {
+                h.accessActionFor(n, r);
+            }
+        }
+        requestFrame();
+    }
+
+    /// Handles one platform event.
+    void handle(ref const Event e)
+    {
+        final switch (e.kind)
+        {
+        case EventKind.none:
+            break;
+        case EventKind.close:
+            running = false;
+            break;
+        case EventKind.resized:
+            updateSize();
+            break;
+        case EventKind.exposed:
+        case EventKind.wake:
+            requestFrame();
+            break;
+        case EventKind.call:
+            if (e.call !is null)
+            {
+                e.call();
+            }
+            requestFrame();
+            break;
+        case EventKind.pointerLeft:
+            pointerIn = false;
+            if (captureNode is null)
+            {
+                setHover(null);
+            }
+            tooltips.pointer(null, mouse);
+            break;
+        case EventKind.focusLost:
+            tooltips.hush();
+            endComposition(focusNode);
+            if (captureNode !is null)
+            {
+                PointerEvent up = PointerEvent(PointerKind.up, mouse, 1);
+                release(up);
+            }
+            sliding = false;
+            tree.root.dismissAll();
+            break;
+        case EventKind.pointer:
+            mouse = Point(e.pos.x / scale, e.pos.y / scale);
+            final switch (e.pointer)
+            {
+            case PointerKind.move:
+            case PointerKind.enter:
+            case PointerKind.leave:
+                pointerIn = true;
+                pointerMoved();
+                break;
+            case PointerKind.down:
+                press(PointerEvent(PointerKind.down, mouse, e.button, e.clicks, e.mods));
+                break;
+            case PointerKind.up:
+                PointerEvent up = PointerEvent(PointerKind.up, mouse, e.button, e.clicks, e.mods);
+                release(up);
+                break;
+            }
+            break;
+        case EventKind.wheel:
+            routeWheel(WheelEvent(Point(e.pos.x / scale, e.pos.y / scale), e.dx * 48, e.dy * 48, e.mods));
+            break;
+        case EventKind.key:
+            key(KeyEvent(e.key, e.mods, e.repeat));
+            break;
+        case EventKind.text:
+            composing = null;
+            if (focusNode !is null)
+            {
+                focusNode.onText(e.text);
+            }
+            break;
+        case EventKind.compose:
+            compose(e.text, e.start, e.length);
+            break;
+        case EventKind.access:
+            runAccess(e.request);
+            break;
+        }
+    }
+
+    /// Deepest node under `p` that a popup does not block, or null.
+    private Node reachableAt(Point p)
+    {
+        Node hit = tree.root.hitTest(p, Point(0, 0));
+        return tree.root.blocks(hit) ? null : hit;
+    }
+
+    /// Deepest interactive node under `p` that a popup does not block, or null.
+    private Node interactiveAt(Point p)
+    {
+        for (Node n = reachableAt(p); n !is null; n = n.parent)
+        {
+            if (n.interactive)
+            {
+                return n;
+            }
+        }
+        return null;
+    }
+
+    /// Changes the hovered node, sending leave and enter.
+    private void setHover(Node n)
+    {
+        if (n is hoverNode)
+        {
+            return;
+        }
+        Node old = hoverNode;
+        hoverNode = n;
+        if (old !is null)
+        {
+            old.hovered = false;
+            old.markNeedsPaint();
+            PointerEvent leave = PointerEvent(PointerKind.leave, mouse);
+            old.onPointer(leave);
+        }
+        if (n !is null)
+        {
+            n.hovered = true;
+            n.markNeedsPaint();
+            PointerEvent enter = PointerEvent(PointerKind.enter, mouse);
+            n.onPointer(enter);
+        }
+    }
+
+    /// Hover update and move delivery, to the captured node while a button is held.
+    private void pointerMoved()
+    {
+        PointerEvent move = PointerEvent(PointerKind.move, mouse);
+        if (captureNode !is null)
+        {
+            bool inside = captureNode.bounds.contains(mouse);
+            if (inside != captureNode.hovered)
+            {
+                captureNode.hovered = inside;
+                captureNode.markNeedsPaint();
+            }
+            captureNode.onPointer(move);
+            showCursor(captureNode.cursor);
+            return;
+        }
+        setHover(interactiveAt(mouse));
+        if (sliding == false)
+        {
+            tooltips.pointer(reachableAt(mouse), mouse);
+        }
+        if (hoverNode !is null)
+        {
+            hoverNode.onPointer(move);
+        }
+        showCursor(hoverNode is null ? CursorShape.arrow : hoverNode.cursor);
+    }
+
+    /// Handles a press: closes popups it is outside of, then focus, a context menu for the right button, then capture
+    /// and delivery. A right press that closed popups goes on, so it can open another context menu.
+    private void press(PointerEvent e)
+    {
+        sliding = false;
+        tooltips.hush();
+        Node under = tree.root.hitTest(e.pos, Point(0, 0));
+        if (tree.root.pressOutside(under) && (e.button != 3 || tree.root.blocks(under)))
+        {
+            setHover(interactiveAt(e.pos));
+            return;
+        }
+        Node hit = reachableAt(e.pos);
+        for (Node n = hit; n !is null; n = n.parent)
+        {
+            if (n.focusable || n.keepFocus || n.parent is null)
+            {
+                if (n.keepFocus == false)
+                {
+                    setKeyboardFocus(false);
+                    setFocus(n.focusable ? n : null);
+                }
+                break;
+            }
+        }
+        for (Node n = e.button == 3 ? hit : null; n !is null; n = n.parent)
+        {
+            if (n.onContextMenu(e.pos, false))
+            {
+                setHover(interactiveAt(e.pos));
+                return;
+            }
+        }
+        Node target = interactiveAt(e.pos);
+        setHover(target);
+        if (target is null)
+        {
+            return;
+        }
+        captureNode = target;
+        target.pressed = true;
+        target.onPointer(e);
+        target.markNeedsPaint();
+    }
+
+    /// Handles a release: delivered to the captured node, or after a slide to the node under it, then hover is
+    /// recomputed. A slid release over nothing interactive closes the popups it is outside of, as a press would.
+    private void release(ref PointerEvent e)
+    {
+        if (sliding)
+        {
+            Node t = interactiveAt(mouse);
+            sliding = false;
+            setHover(t);
+            if (t !is null)
+            {
+                t.onPointer(e);
+            }
+            else
+            {
+                tree.root.pressOutside(tree.root.hitTest(e.pos, Point(0, 0)));
+            }
+            pointerMoved();
+            return;
+        }
+        Node c = captureNode;
+        captureNode = null;
+        if (c !is null)
+        {
+            c.onPointer(e);
+            c.pressed = false;
+            c.markNeedsPaint();
+        }
+        if (c !is null && c.hovered && c.bounds.contains(mouse) == false)
+        {
+            c.hovered = false;
+            c.markNeedsPaint();
+            hoverNode = null;
+        }
+        pointerMoved();
+    }
+
+    /// Wheel event to the deepest node under it, then its parents until one handles it. A diagonal touchpad
+    /// scroll goes out as a vertical and a horizontal event, so a table inside a scroll view gets its share.
+    private void routeWheel(WheelEvent e)
+    {
+        tooltips.hush();
+        if (e.dx != 0 && e.dy != 0)
+        {
+            routeWheel(WheelEvent(e.pos, 0, e.dy, e.mods));
+            routeWheel(WheelEvent(e.pos, e.dx, 0, e.mods));
+            return;
+        }
+        for (Node n = reachableAt(e.pos); n !is null; n = n.parent)
+        {
+            if (n.onWheel(e))
+            {
+                break;
+            }
+        }
+    }
+
+    /// Key press for the focused node, or for the grabbing popup or the app root when nothing has focus.
+    private void key(KeyEvent e)
+    {
+        tooltips.hush();
+        // NOTE: some platforms still send the keys an input method uses, such as Enter to commit.
+        if (composing.length > 0)
+        {
+            return;
+        }
+        Node start = focusNode;
+        if (start is null)
+        {
+            start = tree.root.grabber();
+        }
+        routeKey(start is null ? tree.content : start, e);
+    }
+
+    /// Lets go of the held press: hover follows the pointer and the node under it gets the release.
+    void slidePress()
+    {
+        if (captureNode is null)
+        {
+            return;
+        }
+        captureNode.pressed = false;
+        captureNode.markNeedsPaint();
+        captureNode = null;
+        sliding = true;
+    }
+
+    /// Sends a key `from` did not use to its parents, then to the window.
+    void passKey(Node from, KeyEvent e)
+    {
+        if (from.tree is tree)
+        {
+            routeKey(from.parent, e);
+        }
+    }
+
+    /// Key press for `start` and its parents, then Tab, Escape for popups, the context menu keys, nodes
+    /// listening to the window unless focus is in a popup that grabs input, and the window's own keys.
+    private void routeKey(Node start, ref const KeyEvent e)
+    {
+        for (Node n = start; n !is null; n = n.parent)
+        {
+            if (n.onKey(e))
+            {
+                return;
+            }
+        }
+        if (e.key == Key.tab)
+        {
+            moveFocus((e.mods & Mod.shift) != 0);
+            return;
+        }
+        if (e.key == Key.escape && tree.root.escape())
+        {
+            return;
+        }
+        if ((e.key == Key.menu && e.mods == 0) || (e.key == Key.f10 && e.mods == Mod.shift))
+        {
+            Node at = focusNode is null ? start : focusNode;
+            Rect b = at is null ? Rect.init : at.bounds;
+            for (Node n = at; n !is null; n = n.parent)
+            {
+                if (n.onContextMenu(Point(b.x, b.y + min(b.h, 32f)), true))
+                {
+                    return;
+                }
+            }
+        }
+        if (tree.root.holdsKeys(focusNode) == false)
+        {
+            foreach (WindowKeys w; tree.windowKeys.dup)
+            {
+                if (w.windowKey(e))
+                {
+                    return;
+                }
+            }
+        }
+        if (e.key == Key.f12)
+        {
+            import std.datetime.systime : Clock;
+            import std.format : format;
+
+            screenshotPath = format("dentrite-%s.png", Clock.currTime.toISOString()[0 .. 15]);
+            requestFrame();
+            return;
+        }
+        if (e.key == Key.r && (e.mods & Mod.ctrl) != 0)
+        {
+            reloadTheme();
+            return;
+        }
+        if (e.key == Key.escape && focusNode !is null)
+        {
+            setFocus(null);
+        }
+    }
+
+    /// Moves focus to the next or previous stop inside the focused node, else to the next or previous focusable
+    /// node in tree order, inside the grabbing popup if one is open, and scrolls it into view at the next frame.
+    private void moveFocus(bool backward)
+    {
+        FocusScope inner = cast(FocusScope) focusNode;
+        if (inner !is null && inner.stepFocus(backward))
+        {
+            setKeyboardFocus(true);
+            revealFocus = true;
+            requestFrame();
+            return;
+        }
+        Node[] order;
+        void walk(Node n)
+        {
+            if (n.tabStop && n.size.w > 0 && n.size.h > 0)
+            {
+                order ~= n;
+            }
+            foreach (Node c; n.children)
+            {
+                walk(c);
+            }
+        }
+
+        Popup trap = tree.root.grabber();
+        walk(trap is null ? tree.root : trap);
+        if (order.length == 0)
+        {
+            return;
+        }
+        size_t at = order.length;
+        foreach (size_t i, Node n; order)
+        {
+            if (n is focusNode)
+            {
+                at = i;
+            }
+        }
+        size_t next;
+        if (at == order.length)
+        {
+            next = backward ? order.length - 1 : 0;
+        }
+        else
+        {
+            next = backward ? (at + order.length - 1) % order.length : (at + 1) % order.length;
+        }
+        setKeyboardFocus(true);
+        setFocus(order[next]);
+        tooltips.focus(order[next]);
+        inner = cast(FocusScope) order[next];
+        if (inner !is null)
+        {
+            inner.enterFocus(backward);
+        }
+        revealFocus = true;
+        requestFrame();
+    }
+
+    /// Runs the app's theme check, or the library's.
+    private void check(Theme t)
+    {
+        if (opts.checkTheme !is null)
+        {
+            opts.checkTheme(t);
+        }
+        else
+        {
+            t.check!LibraryStyles();
+        }
+    }
+
+    /// Reloads the theme file, keeping the old theme if the new one has errors.
+    void reloadTheme()
+    {
+        import std.file : readText;
+
+        if (opts.themePath.length == 0)
+        {
+            return;
+        }
+        try
+        {
+            Theme t = new Theme(readText(opts.themePath), opts.themePath);
+            check(t);
+            theme = t;
+            tree.theme = t;
+            tree.restyle();
+            stderr.writeln("dentrite: reloaded ", opts.themePath);
+        }
+        catch (Exception ex)
+        {
+            stderr.writeln("dentrite: theme not reloaded: ", ex.msg);
+        }
+    }
+
+    /// Sets the platform cursor for `shape` if it changed.
+    private void showCursor(CursorShape shape)
+    {
+        if (shape == cursorShown)
+        {
+            return;
+        }
+        cursorShown = shape;
+        platform.setCursor(shape);
+    }
+
+    /// Physical pixels per logical pixel.
+    float pixelScale() const
+    {
+        return scale;
+    }
+
+    /// Logical window size.
+    Size logicalSize() const
+    {
+        return tree.viewport;
+    }
+
+    /// Node a screen reader would see with `role` and `label`, as the tree was last laid out, or null. Finds
+    /// controls by what they show for tests: `h.find(Role.button, "Save")`.
+    const(AccessNode)* find(Role role, string label)
+    {
+        if (lookup is null)
+        {
+            lookup = new AccessTree;
+        }
+        lookup.update(tree, focusNode, true);
+        return lookup.find(role, label);
+    }
+
+    /// Clicks the middle of the node `find` gives for `role` and `label`, then renders a frame. Asserts it is
+    /// there.
+    void click(Role role, string label)
+    {
+        import std.format : format;
+
+        const(AccessNode)* n = find(role, label);
+        assert(n !is null, format("no %s named \"%s\"", role, label));
+        Point p = Point(n.bounds.x + n.bounds.w / 2, n.bounds.y + n.bounds.h / 2);
+        inject(PointerKind.move, p);
+        inject(PointerKind.down, p);
+        inject(PointerKind.up, p);
+        frame();
+    }
+
+    /// Sends a synthetic pointer event for `button` at logical `p` with `mods` held, as platform input would,
+    /// for scripted runs.
+    void inject(PointerKind kind, Point p, ubyte clicks = 1, ubyte button = 1, ubyte mods = 0)
+    {
+        mouse = p;
+        pointerIn = true;
+        final switch (kind)
+        {
+        case PointerKind.move:
+        case PointerKind.enter:
+        case PointerKind.leave:
+            pointerMoved();
+            break;
+        case PointerKind.down:
+            press(PointerEvent(PointerKind.down, p, button, clicks, mods));
+            break;
+        case PointerKind.up:
+            PointerEvent up = PointerEvent(PointerKind.up, p, button, clicks, mods);
+            release(up);
+            break;
+        }
+    }
+
+    /// Shows a native file dialog: `w.fileDialog(FileDialogKind.open, (string[] paths) { ... },
+    /// [FileFilter("D source", "d")])`. `done` runs later on the UI thread with the chosen paths, none if
+    /// cancelled, or at once with none when the platform has no file dialogs.
+    void fileDialog(FileDialogKind kind, void delegate(string[]) done, const(FileFilter)[] filters = null,
+        string start = null)
+    {
+        if (FileDialogs d = cast(FileDialogs) platform)
+        {
+            d.fileDialog(kind, filters, start, done);
+        }
+        else
+        {
+            done(null);
+        }
+    }
+
+    /// Sends a synthetic wheel scroll of `dy` and `dx` logical pixels at logical `p`, for scripted runs.
+    void injectWheel(Point p, float dy, float dx = 0, ubyte mods = 0)
+    {
+        mouse = p;
+        pointerIn = true;
+        routeWheel(WheelEvent(p, dx, dy, mods));
+    }
+
+    /// Sends synthetic text, as platform text input would, for scripted runs.
+    void injectText(string s)
+    {
+        Event e = { kind: EventKind.text, text: s };
+        handle(e);
+    }
+
+    /// Sends synthetic input method text, as a platform would while composing, for scripted runs.
+    void injectCompose(string s, int start = -1, int length = -1)
+    {
+        Event e = { kind: EventKind.compose, text: s, start: start, length: length };
+        handle(e);
+    }
+
+    /// Sends a synthetic key press, for scripted runs.
+    void injectKey(uint k, ubyte m = 0)
+    {
+        Event e = { kind: EventKind.key, key: k, mods: m };
+        handle(e);
+    }
+}
+
+/// Byte offset of code point `n` in `s`, clamped to its length.
+private size_t byteOffset(string s, int n)
+{
+    size_t i;
+    foreach (int k; 0 .. n)
+    {
+        if (i >= s.length)
+        {
+            break;
+        }
+        i += stride(s, i);
+    }
+    return min(i, s.length);
+}
+
+// Headless host: frames draw in software, platform events click a button, Tab and typing reach a text box,
+// and `run` returns on close.
+unittest
+{
+    import dentrite.backend.software : SoftwareRenderer;
+    import dentrite.containers : column;
+    import dentrite.headless : HeadlessPlatform;
+    import dentrite.signals : Signal, signal;
+    import dentrite.widgets.button : Button, button;
+    import dentrite.widgets.textbox : TextBox, textBox;
+
+    WindowOptions o;
+    o.fonts = ["fonts/Inter-Regular.otf", "fonts/Inter-SemiBold.otf", "fonts/JetBrainsMono-Regular.ttf"];
+    HeadlessPlatform p = new HeadlessPlatform(200, 100, 2);
+    SoftwareRenderer r = new SoftwareRenderer;
+    Host h = new Host(p, r, o);
+    scope (exit)
+    {
+        h.close();
+    }
+    int clicks;
+    Signal!string name = signal("");
+    Button b = button("Go", () { ++clicks; });
+    TextBox t = textBox(name);
+    h.setRoot(column()(b, t));
+    h.frame();
+    assert(r.width == 400 && r.height == 200 && p.presented == 1);
+    Color bg = WindowStyle.init.background;
+    assert(r.pixels[$ - 1] == (bg.r | bg.g << 8 | bg.b << 16 | 0xff000000), "background below the content");
+
+    Point at = Point((b.bounds.x + b.bounds.w / 2) * 2, (b.bounds.y + b.bounds.h / 2) * 2);
+    Event move = { kind: EventKind.pointer, pointer: PointerKind.move, pos: at };
+    Event down = { kind: EventKind.pointer, pointer: PointerKind.down, pos: at, button: 1, clicks: 1 };
+    Event up = { kind: EventKind.pointer, pointer: PointerKind.up, pos: at, button: 1, clicks: 1 };
+    Event tab = { kind: EventKind.key, key: Key.tab };
+    Event text = { kind: EventKind.text, text: "hi" };
+    p.queue = [move, down, up, tab, text, Event(EventKind.close)];
+    h.run();
+    assert(clicks == 1);
+    assert(p.cursor == CursorShape.pointer);
+    assert(h.focused is t && h.focusVisible && p.textOn);
+    assert(name.peek == "hi");
+
+    string[][] got;
+    p.fileAnswers = [["/tmp/a.txt", "/tmp/b.txt"]];
+    h.fileDialog(FileDialogKind.openMany, (string[] paths) { got ~= paths; }, [FileFilter("Text", "txt")]);
+    h.fileDialog(FileDialogKind.save, (string[] paths) { got ~= paths; });
+    assert(got.length == 0, "answers arrive as events");
+    p.queue ~= Event(EventKind.close);
+    h.running = true;
+    h.run();
+    assert(got == [["/tmp/a.txt", "/tmp/b.txt"], []] && p.fileAsks == [FileDialogKind.openMany,
+        FileDialogKind.save]);
+}

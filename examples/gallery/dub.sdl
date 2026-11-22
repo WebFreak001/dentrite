@@ -1,0 +1,5 @@
+name "dentrite-gallery"
+description "Every dentrite widget in its states"
+targetType "executable"
+targetPath "bin"
+dependency "dentrite" path="../.."

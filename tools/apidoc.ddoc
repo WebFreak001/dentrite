@@ -1,0 +1,33 @@
+DDOC =
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>$(TITLE)</title>
+<link rel="stylesheet" href="apidoc.css">
+</head>
+<body>
+<nav><a class="home" href="index.html">dentrite</a>
+$(NAV)
+</nav>
+<main>
+<h1>$(TITLE)</h1>
+$(BODY)
+</main>
+</body>
+</html>$(LF)
+
+DDOC_DECL = <div class="decl"><code>$0</code></div>$(LF)
+
+DDOC_DESCRIPTION = <div class="ddoc_description">$0</div>$(LF)
+
+DDOC_EXAMPLES = <div class="ddoc_examples"><h4>Example</h4>$0</div>$(LF)
+
+D_CODE = <pre class="listing"><code>$0</code></pre>
+
+OTHER_CODE = <pre class="listing"><code class="language-$1">$+</code></pre>
+
+DDOC_ENUM_MEMBERS = <ul class="ddoc_members enum_members">$0</ul>$(LF)
+
+DDOC_AUTO_PSYMBOL = $0

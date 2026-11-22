@@ -1,0 +1,51 @@
+name "dentrite"
+description "Retained UI on signals with immediate islands: core, SDL3 platform, GL 3.3 and software renderers"
+
+configuration "default" {
+    targetType "none"
+    dependency "dentrite:sdl3" version="*"
+}
+
+// `dub test` from here runs the tests of every subpackage.
+configuration "unittest" {
+    targetType "library"
+    targetPath "bin"
+    sourcePaths "core/source" "gl33/source" "sdl3/source"
+    importPaths "core/source" "gl33/source" "sdl3/source"
+    libs "freetype" "harfbuzz" "SDL3"
+    lflags "/LIBPATH:$PACKAGE_DIR/winlibs" platform="windows"
+}
+
+subPackage {
+    name "core"
+    description "Core Dentrite library"
+    targetType "library"
+    targetPath "bin"
+    sourcePaths "core/source"
+    importPaths "core/source"
+    libs "freetype" "harfbuzz"
+    lflags "/LIBPATH:$PACKAGE_DIR/winlibs" platform="windows"
+}
+
+subPackage {
+    name "gl33"
+    description "OpenGL 3.3 renderer (dynamically loaded)"
+    targetType "library"
+    targetPath "bin"
+    sourcePaths "gl33/source"
+    importPaths "gl33/source"
+    dependency "dentrite:core" version="*"
+}
+
+subPackage {
+    name "sdl3"
+    description "SDL3 platform, supports GL 3.3 and software"
+    targetType "library"
+    targetPath "bin"
+    sourcePaths "sdl3/source"
+    importPaths "sdl3/source"
+    libs "SDL3"
+    lflags "/LIBPATH:$PACKAGE_DIR/winlibs" platform="windows"
+    dependency "dentrite:core" version="*"
+    dependency "dentrite:gl33" version="*"
+}

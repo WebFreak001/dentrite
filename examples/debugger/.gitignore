@@ -1,0 +1,4 @@
+bin/
+.dub/
+*.png
+layout.json

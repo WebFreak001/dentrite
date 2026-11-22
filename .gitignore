@@ -1,0 +1,28 @@
+# Build
+.dub/
+bin/
+dub.selections.json
+*.lst
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dll
+*.dylib
+*.exe
+*.pdb
+
+# Archives for releases
+*.zip
+*.gz
+
+# Editor
+.vscode/
+
+# Run output
+*.log
+examples/debugger/layout.json
+
+# Windows static libs, built by tools/winlibs.d
+winlibs/

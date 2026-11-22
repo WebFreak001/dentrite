@@ -1,0 +1,453 @@
+#!/usr/bin/env rdmd
+/// Builds static FreeType and HarfBuzz libraries from source into `winlibs/`, where dub looks for them on
+/// Windows. Run `rdmd tools/winlibs.d --freetype --harfbuzz` from any shell, or `ldc2 -run tools/winlibs.d` with
+/// the same options. `--help` lists them.
+///
+/// On Windows it compiles with cl, taken from PATH or else from the newest Visual Studio found by vswhere. The
+/// static C runtime (/MT) matches LDC's default, `--md` switches to /MD for `-link-defaultlib-shared`. Elsewhere
+/// it uses cc, c++ and ar, which is only useful for checking the build.
+/// NOTE: FreeType gets the modules dentrite needs: TrueType and CFF outlines, the autohinter, the smooth
+/// rasterizer and bundled zlib for WOFF. Type 1, bitmap font formats, SDF and SVG are left out.
+module winlibs;
+
+import std.algorithm.searching : all, any, canFind, endsWith, startsWith;
+import std.ascii : isDigit;
+import std.array : join, replace, split;
+import std.file : exists, isDir, mkdirRecurse, read, readText, remove, rename, write;
+import std.format : format;
+import std.getopt : defaultGetoptPrinter, getopt, GetoptResult;
+import std.path : absolutePath, buildNormalizedPath, buildPath, dirName, dirSeparator, pathSplitter;
+import std.process : Config, environment, execute, spawnProcess, wait;
+import std.stdio : stderr, stdout, writefln, writeln;
+import std.string : indexOf, lineSplitter, strip;
+import std.typecons : Tuple;
+import std.uni : toLower, toUpper;
+import std.zip : ArchiveMember, ZipArchive;
+
+/// FreeType version downloaded by a bare `--freetype`.
+enum freetypeDefault = "2.13.3";
+/// HarfBuzz version downloaded by a bare `--harfbuzz`.
+enum harfbuzzDefault = "15.2.0";
+/// User agent for downloads.
+enum userAgent = "dentrite-winlibs";
+
+/// FreeType module classes kept from the source tree's module list.
+immutable string[] freetypeModules = [
+    "autofit_module_class", "tt_driver_class", "cff_driver_class", "psaux_module_class", "psnames_module_class",
+    "pshinter_module_class", "sfnt_module_class", "ft_smooth_renderer_class",
+];
+
+/// FreeType sources for those modules, relative to the source tree.
+immutable string[] freetypeSources = [
+    "src/base/ftsystem.c", "src/base/ftinit.c", "src/base/ftdebug.c", "src/base/ftbase.c", "src/base/ftbbox.c",
+    "src/base/ftbitmap.c", "src/base/ftglyph.c", "src/base/ftmm.c", "src/base/ftstroke.c", "src/base/ftsynth.c",
+    "src/autofit/autofit.c", "src/cff/cff.c", "src/gzip/ftgzip.c", "src/psaux/psaux.c", "src/pshinter/pshinter.c",
+    "src/psnames/psnames.c", "src/sfnt/sfnt.c", "src/smooth/smooth.c", "src/truetype/truetype.c",
+];
+
+/// FreeType functions HarfBuzz looks for at configure time, all present since FreeType 2.11.
+immutable string[] harfbuzzFreetypeDefines = [
+    "HAVE_FREETYPE", "HAVE_FT_GET_VAR_BLEND_COORDINATES", "HAVE_FT_SET_VAR_BLEND_COORDINATES",
+    "HAVE_FT_DONE_MM_VAR", "HAVE_FT_GET_TRANSFORM",
+];
+
+/// Compiler and archiver commands with the environment they run in.
+struct Tools
+{
+    bool msvc;           /// cl and lib, else cc, c++ and ar
+    bool sharedCrt;      /// /MD in place of /MT
+    string cc;           /// C compiler
+    string cxx;          /// C++ compiler
+    string ar;           /// archiver
+    string[string] env;  /// whole environment for the tools, null to inherit
+}
+
+/// Prints the start of stage `what`.
+void stage(string what)
+{
+    writeln("== ", what);
+    stdout.flush();
+}
+
+/// Prints step `msg` of a stage.
+void step(string msg)
+{
+    writeln("   ", msg);
+    stdout.flush();
+}
+
+/// Source tree of library `label` for `what`: version `what` downloaded and unpacked into `srcDir` once, or else
+/// directory `what`. `url` takes the version with dots replaced by `sep`. `marker` is a file every tree has.
+string sources(string label, string what, string srcDir, string url, string sep, string marker)
+{
+    string tree;
+    if (what.all!(c => isDigit(c) || c == '.') == false)
+    {
+        if (exists(what) == false || isDir(what) == false)
+        {
+            throw new Exception(what ~ " is neither a version nor a directory");
+        }
+        tree = absolutePath(what);
+        stage(label ~ ": sources in " ~ tree);
+    }
+    else
+    {
+        stage(label ~ " " ~ what ~ ": sources");
+        string zip = buildPath(srcDir, label.toLower ~ "-" ~ what ~ ".zip");
+        if (exists(zip))
+        {
+            step("downloaded before: " ~ zip);
+        }
+        else
+        {
+            string link = format(url, what.replace(".", sep));
+            step("download " ~ link);
+            run(Tools.init, ["curl", "-fL", "--retry", "2", "-A", userAgent, "-o", zip ~ ".part", link]);
+            rename(zip ~ ".part", zip);
+        }
+        tree = unzip(zip, srcDir, ["include/", "src/"]);
+    }
+    if (exists(buildPath(tree, marker)) == false)
+    {
+        throw new Exception(format("%s has no %s, not a source tree", tree, marker));
+    }
+    return tree;
+}
+
+/// Unpacks the parts of `zip` under the `keep` directories of its top directory into `dir`, unless done before.
+/// Returns the unpacked top directory.
+string unzip(string zip, string dir, string[] keep)
+{
+    ZipArchive archive = new ZipArchive(read(zip));
+    string top;
+    foreach (string name, ArchiveMember m; archive.directory)
+    {
+        top = name[0 .. name.indexOf('/') + 1];
+        break;
+    }
+    if (top.length == 0)
+    {
+        throw new Exception(zip ~ " has no top directory");
+    }
+    string tree = buildPath(dir, top[0 .. $ - 1]);
+    string done = tree ~ ".unpacked";
+    if (exists(done))
+    {
+        step("unpacked before: " ~ tree);
+        return tree;
+    }
+    step("unpack to " ~ tree);
+    string base = buildNormalizedPath(absolutePath(dir)) ~ dirSeparator;
+    size_t count;
+    foreach (string name, ArchiveMember m; archive.directory)
+    {
+        string inner = name.startsWith(top) ? name[top.length .. $] : null;
+        if (name.endsWith("/") || keep.any!(k => inner.startsWith(k)) == false)
+        {
+            continue;
+        }
+        string path = buildNormalizedPath(absolutePath(dir), name);
+        if (path.startsWith(base) == false)
+        {
+            throw new Exception("archive entry outside the directory: " ~ name);
+        }
+        mkdirRecurse(dirName(path));
+        write(path, archive.expand(m));
+        ++count;
+    }
+    write(done, "");
+    step(format("%s files", count));
+    return tree;
+}
+
+/// Compiles FreeType from `src` into a static library in `outDir`.
+void buildFreetype(Tools tools, string src, string outDir)
+{
+    stage("FreeType: module list");
+    string inc = buildPath(outDir, "include");
+    string list = readText(buildPath(src, "include/freetype/config/ftmodule.h"));
+    string[] kept;
+    foreach (string want; freetypeModules)
+    {
+        string found;
+        foreach (string line; list.lineSplitter)
+        {
+            if (line.canFind("FT_USE_MODULE") && line.canFind(" " ~ want ~ " "))
+            {
+                found = line;
+            }
+        }
+        if (found.length == 0)
+        {
+            throw new Exception("FreeType's module list has no " ~ want ~ ", update freetypeModules");
+        }
+        kept ~= found;
+    }
+    // Found before the source tree's own list, so ftinit.c registers only these modules
+    string modules = buildPath(inc, "freetype/config/ftmodule.h");
+    mkdirRecurse(dirName(modules));
+    write(modules, "/* Modules dentrite needs, written by tools/winlibs.d */\n" ~ kept.join("\n") ~ "\n");
+    step(format("%s modules: %-(%s, %)", kept.length, freetypeModules));
+    string[] files;
+    foreach (string f; freetypeSources)
+    {
+        files ~= buildPath(src, f);
+    }
+    build(tools, "FreeType", "freetype", files, [inc, buildPath(src, "include")], ["FT2_BUILD_LIBRARY"], false,
+        outDir);
+}
+
+/// Compiles HarfBuzz from `src`, with FreeType functions from the headers in `ftSrc`, into a static library in
+/// `outDir`.
+void buildHarfbuzz(Tools tools, string src, string ftSrc, string outDir)
+{
+    build(tools, "HarfBuzz", "harfbuzz", [buildPath(src, "src/harfbuzz.cc")], [buildPath(ftSrc, "include")],
+        harfbuzzFreetypeDefines.dup, true, outDir);
+}
+
+/// Compiles `files` as C or C++ with `includes` and `defines`, then archives them as library `name` in `outDir`.
+/// `label` names the stages.
+void build(Tools tools, string label, string name, string[] files, string[] includes, string[] defines, bool cpp,
+    string outDir)
+{
+    stage(format("%s: compile %s file%s", label, files.length, files.length == 1 ? " (a big one, takes a while)"
+        : "s"));
+    string objDir = buildPath(outDir, "obj", name);
+    mkdirRecurse(objDir);
+    string[] objs;
+    foreach (size_t n, string f; files)
+    {
+        string base = pathSplitter(f).back;
+        string obj = buildPath(objDir, base[0 .. base.indexOf('.')] ~ (tools.msvc ? ".obj" : ".o"));
+        string[] cmd;
+        if (tools.msvc)
+        {
+            cmd = [cpp ? tools.cxx : tools.cc, "/nologo", "/c", "/O2", "/DNDEBUG", tools.sharedCrt ? "/MD" : "/MT",
+                "/utf-8", "/D_CRT_SECURE_NO_WARNINGS", "/D_CRT_NONSTDC_NO_WARNINGS", "/Fo" ~ obj];
+            if (cpp)
+            {
+                cmd ~= ["/std:c++17", "/bigobj", "/EHs-c-", "/GR-"];
+            }
+            foreach (string d; defines)
+            {
+                cmd ~= "/D" ~ d;
+            }
+            foreach (string i; includes)
+            {
+                cmd ~= "/I" ~ i;
+            }
+        }
+        else
+        {
+            cmd = [cpp ? tools.cxx : tools.cc, "-c", "-O2", "-DNDEBUG", "-fPIC", "-o", obj];
+            if (cpp)
+            {
+                cmd ~= ["-std=c++17", "-fno-exceptions", "-fno-rtti"];
+            }
+            foreach (string d; defines)
+            {
+                cmd ~= "-D" ~ d;
+            }
+            foreach (string i; includes)
+            {
+                cmd ~= "-I" ~ i;
+            }
+        }
+        step(format("[%s/%s] %s", n + 1, files.length, base));
+        // cl names each file it compiles, which the step line already did
+        run(tools, cmd ~ f, false, tools.msvc);
+        objs ~= obj;
+    }
+    string lib = buildPath(outDir, tools.msvc ? name ~ ".lib" : "lib" ~ name ~ ".a");
+    stage(label ~ ": archive " ~ lib);
+    if (exists(lib))
+    {
+        remove(lib);
+    }
+    run(tools, tools.msvc ? [tools.ar, "/nologo", "/OUT:" ~ lib] ~ objs : [tools.ar, "rcs", lib] ~ objs);
+}
+
+/// Compiler setup: cl from PATH or from Visual Studio's vcvars64.bat on Windows, gcc tools elsewhere.
+/// `scratch` holds the batch file that reads the Visual Studio environment.
+Tools findTools(bool sharedCrt, string scratch)
+{
+    stage("Compiler");
+    Tools t;
+    t.sharedCrt = sharedCrt;
+    version (Windows)
+    {
+        t.msvc = true;
+        t.cc = which("cl.exe", environment.get("PATH", ""));
+        t.ar = which("lib.exe", environment.get("PATH", ""));
+        if (t.cc.length > 0 && t.ar.length > 0)
+        {
+            t.cxx = t.cc;
+            step("on PATH: " ~ t.cc);
+            return t;
+        }
+        string vswhere = buildPath(environment.get("ProgramFiles(x86)", `C:\Program Files (x86)`),
+            `Microsoft Visual Studio\Installer\vswhere.exe`);
+        if (exists(vswhere) == false)
+        {
+            throw new Exception("no cl on PATH and no vswhere, run from a Visual Studio x64 command prompt");
+        }
+        string vs = run(Tools.init, [vswhere, "-latest", "-products", "*", "-requires",
+            "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "-property", "installationPath"], true).strip;
+        string vcvars = buildPath(vs, `VC\Auxiliary\Build\vcvars64.bat`);
+        if (vs.length == 0 || exists(vcvars) == false)
+        {
+            throw new Exception("Visual Studio has no x64 C++ tools, install the C++ desktop workload");
+        }
+        step("Visual Studio: " ~ vs);
+        step("load " ~ vcvars);
+        mkdirRecurse(scratch);
+        string bat = buildPath(scratch, "vcvars.bat");
+        write(bat, "@call \"" ~ vcvars ~ "\" >nul\r\n@set\r\n");
+        string path;
+        foreach (string line; run(Tools.init, ["cmd", "/d", "/c", bat], true).lineSplitter)
+        {
+            ptrdiff_t eq = line.indexOf('=');
+            if (eq > 0)
+            {
+                t.env[line[0 .. eq]] = line[eq + 1 .. $];
+                if (line[0 .. eq].toUpper == "PATH")
+                {
+                    path = line[eq + 1 .. $];
+                }
+            }
+        }
+        // Windows finds a bare program name on this process's PATH, not the one given to the child
+        t.cc = which("cl.exe", path);
+        t.ar = which("lib.exe", path);
+        if (t.cc.length == 0 || t.ar.length == 0)
+        {
+            throw new Exception("vcvars64.bat put no cl.exe or lib.exe on PATH");
+        }
+        t.cxx = t.cc;
+        step("cl: " ~ t.cc);
+    }
+    else
+    {
+        t.cc = "cc";
+        t.cxx = "c++";
+        t.ar = "ar";
+        step("cc, c++ and ar, for checking only");
+    }
+    return t;
+}
+
+/// Full path of `exe` in the directories of `path`, a PATH value, or null.
+string which(string exe, string path)
+{
+    version (Windows)
+    {
+        enum char sep = ';';
+    }
+    else
+    {
+        enum char sep = ':';
+    }
+    foreach (string dir; path.split(sep))
+    {
+        if (dir.length > 0 && exists(buildPath(dir, exe)))
+        {
+            return buildPath(dir, exe);
+        }
+    }
+    return null;
+}
+
+/// Runs `cmd` in `tools`' environment and throws on failure. With `capture` the output is returned, otherwise
+/// it goes to the console, without its first line when `skipFirst`.
+string run(Tools tools, string[] cmd, bool capture = false, bool skipFirst = false)
+{
+    Config cfg = tools.env is null ? Config.none : Config.newEnv;
+    if (capture || skipFirst)
+    {
+        Tuple!(int, "status", string, "output") r = execute(cmd, tools.env, cfg);
+        if (r.status != 0)
+        {
+            throw new Exception(format("%s failed:\n%s", cmd[0], r.output));
+        }
+        if (capture)
+        {
+            return r.output;
+        }
+        ptrdiff_t nl = r.output.indexOf('\n');
+        string rest = nl < 0 ? null : r.output[nl + 1 .. $].strip;
+        if (rest.length > 0)
+        {
+            writeln(rest);
+        }
+        return null;
+    }
+    if (wait(spawnProcess(cmd, tools.env, cfg)) != 0)
+    {
+        throw new Exception(cmd[0] ~ " failed");
+    }
+    return null;
+}
+
+/// Parses options, then fetches and builds what was asked.
+int main(string[] args)
+{
+    string freetype;
+    string harfbuzz;
+    string outDir = buildPath(dirName(dirName(absolutePath(__FILE_FULL_PATH__))), "winlibs");
+    bool md;
+    // getopt would take the next argument as the value of a bare flag
+    foreach (ref string a; args[1 .. $])
+    {
+        if (a == "--freetype" || a == "--harfbuzz")
+        {
+            a ~= "=" ~ (a == "--freetype" ? freetypeDefault : harfbuzzDefault);
+        }
+    }
+    GetoptResult opts;
+    try
+    {
+        opts = getopt(args,
+            "freetype", "Build FreeType: a version to download (" ~ freetypeDefault ~ " when bare) or a source "
+                ~ "directory.", &freetype,
+            "harfbuzz", "Build HarfBuzz: a version to download (" ~ harfbuzzDefault ~ " when bare) or a source "
+                ~ "directory. Takes FreeType's headers from the FreeType sources.", &harfbuzz,
+            "out", "Output directory, winlibs/ at the repository root by default.", &outDir,
+            "md", "Link the C runtime as a DLL (/MD), for LDC's -link-defaultlib-shared.", &md);
+    }
+    catch (Exception e)
+    {
+        stderr.writeln(e.msg);
+        return 1;
+    }
+    if (opts.helpWanted || args.length > 1 || (freetype.length == 0 && harfbuzz.length == 0))
+    {
+        defaultGetoptPrinter("Builds static FreeType and HarfBuzz for dentrite.\n"
+            ~ "Usage: rdmd tools/winlibs.d [--freetype[=VERSION|DIR]] [--harfbuzz[=VERSION|DIR]]", opts.options);
+        return opts.helpWanted ? 0 : 1;
+    }
+    try
+    {
+        Tools tools = findTools(md, outDir);
+        string srcDir = buildPath(outDir, "src");
+        mkdirRecurse(srcDir);
+        string ftSource = sources("FreeType", freetype.length > 0 ? freetype : freetypeDefault, srcDir,
+            "https://github.com/freetype/freetype/archive/refs/tags/VER-%s.zip", "-", "src/base/ftinit.c");
+        if (freetype.length > 0)
+        {
+            buildFreetype(tools, ftSource, outDir);
+        }
+        if (harfbuzz.length > 0)
+        {
+            string hbSource = sources("HarfBuzz", harfbuzz, srcDir,
+                "https://github.com/harfbuzz/harfbuzz/archive/refs/tags/%s.zip", ".", "src/harfbuzz.cc");
+            buildHarfbuzz(tools, hbSource, ftSource, outDir);
+        }
+    }
+    catch (Exception e)
+    {
+        stderr.writeln("winlibs: ", e.msg);
+        return 1;
+    }
+    stage("Done, libraries in " ~ outDir);
+    return 0;
+}

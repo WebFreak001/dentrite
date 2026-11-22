@@ -1,0 +1,315 @@
+/// SDL3 subset used by dentrite. Checked against SDL 3.2.10 headers.
+module dentrite.c.sdl;
+
+extern (C) nothrow @nogc:
+
+/// Opaque window.
+struct SDL_Window;
+/// Opaque GL context state.
+struct SDL_GLContextState;
+/// Opaque cursor.
+struct SDL_Cursor;
+/// GL context handle.
+alias SDL_GLContext = SDL_GLContextState*;
+/// Function pointer returned by `SDL_GL_GetProcAddress`.
+alias SDL_FunctionPointer = void function();
+
+/// Pixel buffer. Fields are read-only, `pixels` is writable.
+struct SDL_Surface
+{
+    uint flags;     /// SDL_SurfaceFlags
+    uint format;    /// SDL_PixelFormat
+    int w;          /// width
+    int h;          /// height
+    int pitch;      /// bytes per row
+    void* pixels;   /// rows
+    int refcount;   /// application references
+    void* reserved; /// internal
+}
+
+/// Integer rectangle.
+struct SDL_Rect
+{
+    int x; /// left
+    int y; /// top
+    int w; /// width
+    int h; /// height
+}
+
+enum uint SDL_PIXELFORMAT_ABGR8888 = 0x16762004; /// bytes R, G, B, A in memory on little-endian
+
+enum uint SDL_INIT_VIDEO = 0x20; /// video and events
+
+enum ulong SDL_WINDOW_OPENGL = 0x2;                /// usable with a GL context
+enum ulong SDL_WINDOW_HIDDEN = 0x8;                /// not shown until `SDL_ShowWindow`
+enum ulong SDL_WINDOW_RESIZABLE = 0x20;            /// user resizable
+enum ulong SDL_WINDOW_HIGH_PIXEL_DENSITY = 0x2000; /// full resolution back buffer on HiDPI
+
+/// GL context attributes, in header order.
+enum SDL_GLAttr : int
+{
+    redSize, greenSize, blueSize, alphaSize, bufferSize, doubleBuffer, depthSize, stencilSize,
+    accumRedSize, accumGreenSize, accumBlueSize, accumAlphaSize, stereo, multisampleBuffers,
+    multisampleSamples, acceleratedVisual, retainedBacking, contextMajorVersion, contextMinorVersion,
+    contextFlags, contextProfileMask, shareWithCurrentContext, framebufferSrgbCapable,
+}
+
+enum int SDL_GL_CONTEXT_PROFILE_CORE = 1; /// core profile mask
+
+/// Event types used here.
+enum SDL_EventType : uint
+{
+    quit = 0x100,
+    windowShown = 0x202,
+    windowExposed = 0x204,
+    windowMoved = 0x205,
+    windowResized = 0x206,
+    windowPixelSizeChanged = 0x207,
+    windowMouseLeave = 0x20D,
+    windowFocusGained = 0x20E,
+    windowFocusLost = 0x20F,
+    windowCloseRequested = 0x210,
+    windowDisplayScaleChanged = 0x214,
+    keyDown = 0x300,
+    keyUp = 0x301,
+    textEditing = 0x302,
+    textInput = 0x303,
+    mouseMotion = 0x400,
+    mouseButtonDown = 0x401,
+    mouseButtonUp = 0x402,
+    mouseWheel = 0x403,
+    user = 0x8000,
+}
+
+/// Fields shared by every event.
+struct SDL_CommonEvent
+{
+    uint type;      /// SDL_EventType
+    uint reserved;  /// unused
+    ulong timestamp; /// nanoseconds
+}
+
+/// Window state change.
+struct SDL_WindowEvent
+{
+    uint type;       /// SDL_EventType
+    uint reserved;   /// unused
+    ulong timestamp; /// nanoseconds
+    uint windowID;   /// window
+    int data1;       /// event dependent
+    int data2;       /// event dependent
+}
+
+/// Key press or release.
+struct SDL_KeyboardEvent
+{
+    uint type;       /// SDL_EventType
+    uint reserved;   /// unused
+    ulong timestamp; /// nanoseconds
+    uint windowID;   /// window with focus
+    uint which;      /// keyboard
+    int scancode;    /// physical key
+    uint key;        /// virtual key, SDLK_*
+    ushort mod;      /// SDL_KMOD_* bits
+    ushort raw;      /// platform scancode
+    bool down;       /// pressed
+    bool repeat;     /// auto-repeat
+}
+
+/// Committed text.
+struct SDL_TextInputEvent
+{
+    uint type;         /// SDL_EventType
+    uint reserved;     /// unused
+    ulong timestamp;   /// nanoseconds
+    uint windowID;     /// window with focus
+    const(char)* text; /// UTF-8, owned by SDL
+}
+
+/// Text an input method is composing.
+struct SDL_TextEditingEvent
+{
+    uint type;         /// SDL_EventType
+    uint reserved;     /// unused
+    ulong timestamp;   /// nanoseconds
+    uint windowID;     /// window with focus
+    const(char)* text; /// UTF-8, owned by SDL
+    int start;         /// first selected code point, or the cursor, -1 if unset
+    int length;        /// selected code points, -1 if unset
+}
+
+/// Pointer motion.
+struct SDL_MouseMotionEvent
+{
+    uint type;       /// SDL_EventType
+    uint reserved;   /// unused
+    ulong timestamp; /// nanoseconds
+    uint windowID;   /// window
+    uint which;      /// mouse
+    uint state;      /// button bits
+    float x;         /// window coordinates
+    float y;         /// window coordinates
+    float xrel;      /// relative motion
+    float yrel;      /// relative motion
+}
+
+/// Pointer button press or release.
+struct SDL_MouseButtonEvent
+{
+    uint type;       /// SDL_EventType
+    uint reserved;   /// unused
+    ulong timestamp; /// nanoseconds
+    uint windowID;   /// window
+    uint which;      /// mouse
+    ubyte button;    /// 1 left, 2 middle, 3 right
+    bool down;       /// pressed
+    ubyte clicks;    /// 2 for a double click
+    ubyte padding;   /// unused
+    float x;         /// window coordinates
+    float y;         /// window coordinates
+}
+
+/// Wheel motion.
+struct SDL_MouseWheelEvent
+{
+    uint type;       /// SDL_EventType
+    uint reserved;   /// unused
+    ulong timestamp; /// nanoseconds
+    uint windowID;   /// window
+    uint which;      /// mouse
+    float x;         /// horizontal amount, positive right
+    float y;         /// vertical amount, positive away from the user
+    int direction;   /// 1 when flipped
+    float mouseX;    /// pointer position
+    float mouseY;    /// pointer position
+}
+
+/// Application event.
+struct SDL_UserEvent
+{
+    uint type;       /// from `SDL_RegisterEvents`
+    uint reserved;   /// unused
+    ulong timestamp; /// nanoseconds
+    uint windowID;   /// window or 0
+    int code;        /// user code
+    void* data1;     /// user data
+    void* data2;     /// user data
+}
+
+/// Any event, 128 bytes.
+union SDL_Event
+{
+    uint type;                    /// SDL_EventType
+    SDL_CommonEvent common;       /// shared fields
+    SDL_WindowEvent window;       /// window events
+    SDL_KeyboardEvent key;        /// key events
+    SDL_TextInputEvent text;      /// text input
+    SDL_TextEditingEvent edit;    /// input method composition
+    SDL_MouseMotionEvent motion;  /// pointer motion
+    SDL_MouseButtonEvent button;  /// pointer buttons
+    SDL_MouseWheelEvent wheel;    /// wheel
+    SDL_UserEvent user;           /// application events
+    ubyte[128] padding;           /// full size
+}
+
+static assert(SDL_Event.sizeof == 128);
+static assert(SDL_KeyboardEvent.sizeof == 40);
+static assert(SDL_MouseButtonEvent.sizeof == 40);
+static assert(SDL_TextEditingEvent.sizeof == 40);
+
+enum ushort SDL_KMOD_SHIFT = 0x0003; /// either shift
+enum ushort SDL_KMOD_CTRL = 0x00C0;  /// either ctrl
+enum ushort SDL_KMOD_ALT = 0x0300;   /// either alt
+enum ushort SDL_KMOD_GUI = 0x0C00;   /// either GUI key
+
+/// System cursor shapes, in header order.
+enum SDL_SystemCursor : int
+{
+    default_, text, wait, crosshair, progress, nwseResize, neswResize, ewResize, nsResize, move,
+    notAllowed, pointer,
+}
+
+bool SDL_Init(uint flags);                              /// starts subsystems
+void SDL_Quit();                                        /// stops everything
+const(char)* SDL_GetError();                            /// last error text
+const(char)* SDL_GetCurrentVideoDriver();               /// video driver name, such as "x11" or "wayland"
+bool SDL_SetHint(const(char)* name, const(char)* value); /// sets a hint
+void SDL_free(void* mem);                               /// frees SDL allocations
+/// Opaque shared library.
+struct SDL_SharedObject;
+SDL_SharedObject* SDL_LoadObject(const(char)* file); /// opens a shared library, null on failure
+SDL_FunctionPointer SDL_LoadFunction(SDL_SharedObject* handle, const(char)* name); /// symbol, or null
+void SDL_UnloadObject(SDL_SharedObject* handle); /// closes a shared library
+
+/// Opaque read and write stream.
+struct SDL_IOStream;
+SDL_IOStream* SDL_IOFromConstMem(const(void)* mem, size_t size); /// read-only stream over memory
+SDL_Surface* SDL_ConvertSurface(SDL_Surface* surface, uint format); /// copy in pixel format `format`
+bool SDL_LockSurface(SDL_Surface* surface);              /// makes `pixels` readable
+void SDL_UnlockSurface(SDL_Surface* surface);            /// ends `SDL_LockSurface`
+
+SDL_Window* SDL_CreateWindow(const(char)* title, int w, int h, ulong flags); /// new window
+void SDL_DestroyWindow(SDL_Window* window);             /// closes a window
+bool SDL_ShowWindow(SDL_Window* window);                /// maps a hidden window
+bool SDL_GetWindowSize(SDL_Window* window, int* w, int* h);         /// size in window coordinates
+bool SDL_GetWindowSizeInPixels(SDL_Window* window, int* w, int* h); /// size in pixels
+bool SDL_GetWindowPosition(SDL_Window* window, int* x, int* y);     /// position in screen coordinates
+/// Size of the decorations around the window.
+bool SDL_GetWindowBordersSize(SDL_Window* window, int* top, int* left, int* bottom, int* right);
+float SDL_GetWindowDisplayScale(SDL_Window* window);    /// pixel density times content scale
+uint SDL_GetWindowID(SDL_Window* window);               /// window id in events
+uint SDL_GetWindowProperties(SDL_Window* window);       /// properties of a window, 0 on failure
+void* SDL_GetPointerProperty(uint props, const(char)* name, void* fallback); /// pointer property or `fallback`
+
+bool SDL_GL_SetAttribute(SDL_GLAttr attr, int value);   /// context attribute for the next context
+SDL_GLContext SDL_GL_CreateContext(SDL_Window* window); /// new current context
+bool SDL_GL_MakeCurrent(SDL_Window* window, SDL_GLContext context); /// binds a context
+bool SDL_GL_DestroyContext(SDL_GLContext context);      /// frees a context
+bool SDL_GL_SetSwapInterval(int interval);              /// 1 for vsync
+bool SDL_GL_SwapWindow(SDL_Window* window);             /// presents
+SDL_FunctionPointer SDL_GL_GetProcAddress(const(char)* proc); /// GL entry point
+
+SDL_Surface* SDL_GetWindowSurface(SDL_Window* window);  /// software framebuffer, invalid after a resize
+bool SDL_UpdateWindowSurface(SDL_Window* window);       /// presents the window surface
+bool SDL_SetWindowSurfaceVSync(SDL_Window* window, int vsync); /// 1 for vsync on surface updates
+SDL_Surface* SDL_CreateSurfaceFrom(int w, int h, uint format, void* pixels, int pitch); /// wraps pixels
+void SDL_DestroySurface(SDL_Surface* surface);          /// frees a surface, not wrapped pixels
+/// Copies `src` into `dst` with format conversion, null rects for whole surfaces.
+bool SDL_BlitSurface(SDL_Surface* src, const(SDL_Rect)* srcRect, SDL_Surface* dst, const(SDL_Rect)* dstRect);
+
+bool SDL_PollEvent(SDL_Event* event);                   /// next event, false if none
+bool SDL_WaitEventTimeout(SDL_Event* event, int timeoutMS); /// next event, false on timeout
+bool SDL_PushEvent(SDL_Event* event);                   /// queues an event, any thread
+uint SDL_RegisterEvents(int count);                     /// first of `count` user event types
+
+bool SDL_StartTextInput(SDL_Window* window);            /// enables text events
+bool SDL_StopTextInput(SDL_Window* window);             /// disables text events
+/// Where an input method places its windows, `cursor` from `rect.x`, all in window coordinates.
+bool SDL_SetTextInputArea(SDL_Window* window, const(SDL_Rect)* rect, int cursor);
+ushort SDL_GetModState();                              /// held modifiers, SDL_KMOD_* bits
+
+char* SDL_GetClipboardText();                           /// clipboard, free with SDL_free
+bool SDL_SetClipboardText(const(char)* text);           /// sets the clipboard
+
+SDL_Cursor* SDL_CreateSystemCursor(SDL_SystemCursor id); /// stock cursor
+bool SDL_SetCursor(SDL_Cursor* cursor);                 /// active cursor
+
+/// File type offered by a file dialog.
+struct SDL_DialogFileFilter
+{
+    const(char)* name;    /// shown name
+    const(char)* pattern; /// extensions separated by ';', "*" for every file
+}
+
+/// File dialog answer: null `filelist` on error, empty on cancel. May run on any thread.
+alias SDL_DialogFileCallback = void function(void* userdata, const(char*)* filelist, int filter);
+
+/// Shows an open dialog. `filters` and `defaultLocation` must stay valid until the callback.
+void SDL_ShowOpenFileDialog(SDL_DialogFileCallback callback, void* userdata, SDL_Window* window,
+    const(SDL_DialogFileFilter)* filters, int nfilters, const(char)* defaultLocation, bool allowMany);
+/// Shows a save dialog. `filters` and `defaultLocation` must stay valid until the callback.
+void SDL_ShowSaveFileDialog(SDL_DialogFileCallback callback, void* userdata, SDL_Window* window,
+    const(SDL_DialogFileFilter)* filters, int nfilters, const(char)* defaultLocation);
+/// Shows a folder dialog. `defaultLocation` must stay valid until the callback.
+void SDL_ShowOpenFolderDialog(SDL_DialogFileCallback callback, void* userdata, SDL_Window* window,
+    const(char)* defaultLocation, bool allowMany);

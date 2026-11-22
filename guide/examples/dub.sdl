@@ -1,0 +1,18 @@
+name "dentrite-guide"
+description "Compiled examples behind the usage guide"
+targetType "executable"
+targetPath "bin"
+dependency "dentrite" path="../.."
+
+// `dub run -- NAME` opens an example, `dub test` runs every example's tests.
+configuration "examples" {
+    mainSourceFile "source/app.d"
+}
+
+// `dub run -c hello`: the program of the first chapter.
+configuration "hello" {
+    targetName "hello"
+    sourceFiles "hello/hello.d"
+    mainSourceFile "hello/hello.d"
+    excludedSourceFiles "source/app.d"
+}
