@@ -85,8 +85,8 @@ class Host : Services
     Theme theme;          /// current theme
     FrameStats stats;     /// timings of the last frame
     bool running = true;  /// set to false to make `run` return after the current frame
-    /// App work at frame start, such as draining mailboxes. Changes made here show in the same frame, so they do
-    /// not ask for another.
+    /// App work at frame start, such as draining mailboxes. Tree changes made here show in the same frame and ask
+    /// for no other, `requestFrame` still does.
     void delegate()[] beforeFrame;
     string screenshotPath; /// PNG file written after the next frame, then cleared
     Platform platform;    /// window system side, see `Platform`
@@ -375,13 +375,14 @@ class Host : Services
     {
         frameTime = MonoTime.currTime;
         clock.started(frameTime);
+        tree.frameStart = true;
         foreach (void delegate() hook; beforeFrame)
         {
             hook();
         }
         tree.firePaintTimers(frameTime);
         tooltips.tick(frameTime);
-        clock.requested = false;
+        tree.frameStart = false;
         MonoTime t0 = MonoTime.currTime;
         tree.flush();
         int boundaries = tree.boundaryLayouts;
@@ -1281,4 +1282,37 @@ unittest
     assert(h.visible == false && p.hidden && b.pressed == false && b.hovered == false);
     h.visible = true;
     assert(h.visible);
+}
+
+// A frame-start hook changing the tree asks for no new frame, `requestFrame` in it does.
+unittest
+{
+    import dentrite.backend.software : SoftwareRenderer;
+    import dentrite.headless : HeadlessPlatform;
+    import dentrite.signals : Signal, signal;
+    import dentrite.widgets.label : label;
+
+    WindowOptions o;
+    o.fonts = ["fonts/Inter-Regular.otf", "fonts/Inter-SemiBold.otf", "fonts/JetBrainsMono-Regular.ttf"];
+    Host h = new Host(new HeadlessPlatform(200, 100), new SoftwareRenderer, o);
+    scope (exit)
+    {
+        h.close();
+    }
+    Signal!string s = signal("a");
+    h.setRoot(label(() => s.get));
+    h.frame();
+    bool again;
+    h.beforeFrame ~= () {
+        s.set(s.peek ~ "a");
+        if (again)
+        {
+            h.requestFrame();
+        }
+    };
+    h.frame();
+    assert(h.clock.requested == false);
+    again = true;
+    h.frame();
+    assert(h.clock.requested);
 }

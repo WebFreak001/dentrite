@@ -261,6 +261,7 @@ final class Tree
     WindowKeys[] windowKeys; /// nodes hearing keys from anywhere in the window, in attach order
     int boundaryLayouts;  /// relayout boundaries laid out in the last flush
     uint styleVersion;    /// bumped by `restyle`, for nodes caching measurements
+    bool frameStart;      /// set by the host around frame-start hooks, where paint requests need no new frame
 
     private Node[] dirty;  /// boundaries marked since the last flush
     private bool flushing; /// inside `flush`, where paint requests need no new frame
@@ -346,7 +347,7 @@ final class Tree
     void requestPaint()
     {
         paintRequested = true;
-        if (services !is null && flushing == false)
+        if (services !is null && flushing == false && frameStart == false)
         {
             services.requestFrame();
         }
