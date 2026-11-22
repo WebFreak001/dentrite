@@ -5,11 +5,12 @@ import core.sync.semaphore : Semaphore;
 import core.time : Duration;
 import dentrite.access : AccessAdapter, AccessDemand, AccessUpdate;
 import dentrite.geom : Rect;
+import dentrite.image : Image;
 import dentrite.node : CursorShape;
 import dentrite.platform;
 
 /// Fixed size framebuffer with events queued by the app.
-final class HeadlessPlatform : Platform, FileDialogs, AccessAdapter
+final class HeadlessPlatform : Platform, FileDialogs, AccessAdapter, WindowControl
 {
     Metrics size;        /// framebuffer size and scale
     Event[] queue;       /// events `wait` hands out, oldest first
@@ -22,6 +23,10 @@ final class HeadlessPlatform : Platform, FileDialogs, AccessAdapter
     int presented;       /// frames presented
     AccessDemand listening; /// what `demand` answers, `full` turns into `changes` once read
     AccessUpdate[] accessUpdates; /// updates sent while listening, oldest first
+    string title;        /// last title set
+    bool hidden;         /// true while hidden
+    int[2] minSize;      /// last minimum size, width then height
+    Image icon;          /// last icon set
 
     /// Platform `w` by `h` logical pixels at `scale`.
     this(int w, int h, float scale = 1)
@@ -87,6 +92,36 @@ final class HeadlessPlatform : Platform, FileDialogs, AccessAdapter
     void update(ref const AccessUpdate u, float scale)
     {
         accessUpdates ~= cast(AccessUpdate) u;
+    }
+
+    /// Records the title.
+    void setTitle(string t)
+    {
+        title = t;
+    }
+
+    /// Records whether the window is shown.
+    void setVisible(bool on)
+    {
+        hidden = on == false;
+    }
+
+    /// False while hidden.
+    bool visible()
+    {
+        return hidden == false;
+    }
+
+    /// Records the minimum size.
+    void setMinimumSize(int w, int h)
+    {
+        minSize = [w, h];
+    }
+
+    /// Records the icon.
+    void setIcon(Image img)
+    {
+        icon = img;
     }
 
     /// Counts the frame.

@@ -260,6 +260,11 @@ void SDL_UnlockSurface(SDL_Surface* surface);            /// ends `SDL_LockSurfa
 SDL_Window* SDL_CreateWindow(const(char)* title, int w, int h, ulong flags); /// new window
 void SDL_DestroyWindow(SDL_Window* window);             /// closes a window
 bool SDL_ShowWindow(SDL_Window* window);                /// maps a hidden window
+bool SDL_HideWindow(SDL_Window* window);                /// unmaps a window
+ulong SDL_GetWindowFlags(SDL_Window* window);           /// SDL_WINDOW_* bits
+bool SDL_SetWindowTitle(SDL_Window* window, const(char)* title); /// sets the title bar text
+bool SDL_SetWindowMinimumSize(SDL_Window* window, int w, int h); /// smallest size, 0 for no limit
+bool SDL_SetWindowIcon(SDL_Window* window, SDL_Surface* icon);  /// window icon, copied
 bool SDL_GetWindowSize(SDL_Window* window, int* w, int* h);         /// size in window coordinates
 bool SDL_GetWindowSizeInPixels(SDL_Window* window, int* w, int* h); /// size in pixels
 bool SDL_GetWindowPosition(SDL_Window* window, int* x, int* y);     /// position in screen coordinates

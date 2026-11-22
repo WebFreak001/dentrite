@@ -12,6 +12,7 @@ import dentrite.access;
 import dentrite.containers : PanelStyle, ScrollStyle, SeparatorStyle, scrollIntoView;
 import dentrite.dock : DockStyle;
 import dentrite.draw;
+import dentrite.image : Image;
 import dentrite.island : IslandStyle;
 import dentrite.loop : FrameClock;
 import dentrite.node;
@@ -1076,6 +1077,68 @@ class Host : Services
         }
     }
 
+    /// Window title.
+    string title()
+    {
+        return access.title;
+    }
+
+    /// Sets the window title, which also names the window for screen readers.
+    void title(string t)
+    {
+        access.title = t;
+        if (WindowControl c = cast(WindowControl) platform)
+        {
+            c.setTitle(t);
+        }
+        requestFrame();
+    }
+
+    /// True unless the window is hidden, always true when the platform cannot hide it.
+    bool visible()
+    {
+        WindowControl c = cast(WindowControl) platform;
+        return c is null || c.visible();
+    }
+
+    /// Shows or hides the window. Hiding ends presses, input method text and hover, as losing focus and the pointer does.
+    void visible(bool on)
+    {
+        WindowControl c = cast(WindowControl) platform;
+        if (c is null || on == c.visible())
+        {
+            return;
+        }
+        if (on == false)
+        {
+            Event left = Event(EventKind.pointerLeft);
+            Event blur = Event(EventKind.focusLost);
+            handle(blur);
+            handle(left);
+        }
+        c.setVisible(on);
+        requestFrame();
+    }
+
+    /// Sets the smallest size the user can resize the window to, in logical pixels, 0 for no limit.
+    void minimumSize(int w, int h)
+    {
+        if (WindowControl c = cast(WindowControl) platform)
+        {
+            c.setMinimumSize(w, h);
+        }
+    }
+
+    /// Sets the icon the window system shows for the window, such as one from `loadImage`.
+    void icon(Image img)
+    {
+        assert(img !is null && img.empty == false);
+        if (WindowControl c = cast(WindowControl) platform)
+        {
+            c.setIcon(img);
+        }
+    }
+
     /// Sends a synthetic wheel scroll of `dy` and `dx` logical pixels at logical `p`, for scripted runs.
     void injectWheel(Point p, float dy, float dx = 0, ubyte mods = 0)
     {
@@ -1174,4 +1237,48 @@ unittest
     h.run();
     assert(got == [["/tmp/a.txt", "/tmp/b.txt"], []] && p.fileAsks == [FileDialogKind.openMany,
         FileDialogKind.save]);
+}
+
+// Window setters reach the platform, the title names the window for screen readers, and hiding ends a press.
+unittest
+{
+    import dentrite.backend.software : SoftwareRenderer;
+    import dentrite.containers : column;
+    import dentrite.headless : HeadlessPlatform;
+    import dentrite.image : Image;
+    import dentrite.widgets.button : Button, button;
+
+    WindowOptions o;
+    o.title = "One";
+    o.accessibility = true;
+    o.fonts = ["fonts/Inter-Regular.otf", "fonts/Inter-SemiBold.otf", "fonts/JetBrainsMono-Regular.ttf"];
+    HeadlessPlatform p = new HeadlessPlatform(200, 100);
+    Host h = new Host(p, new SoftwareRenderer, o);
+    scope (exit)
+    {
+        h.close();
+    }
+    Button b = button("Go", () {});
+    h.setRoot(column()(b));
+    p.listening = AccessDemand.full;
+    h.frame();
+    assert(h.title == "One" && h.access.find(Role.window, "One") !is null);
+
+    h.title = "Two";
+    h.frame();
+    assert(p.title == "Two" && h.access.find(Role.window, "Two") !is null);
+
+    h.minimumSize(320, 200);
+    assert(p.minSize == [320, 200]);
+    Image img = new Image(2, 2);
+    h.icon(img);
+    assert(p.icon is img);
+
+    Point at = Point(b.bounds.x + 4, b.bounds.y + 4);
+    h.inject(PointerKind.down, at);
+    assert(b.pressed);
+    h.visible = false;
+    assert(h.visible == false && p.hidden && b.pressed == false && b.hovered == false);
+    h.visible = true;
+    assert(h.visible);
 }

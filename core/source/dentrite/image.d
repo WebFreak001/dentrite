@@ -5,6 +5,7 @@
 module dentrite.image;
 
 import dentrite.geom : Size;
+import std.algorithm.comparison : min;
 
 /// Picture with a fixed size. Change pixels in place, then call `changed` and repaint what shows it.
 final class Image
@@ -93,9 +94,25 @@ final class Image
         pixels[i + 2] = premultiply(b, a);
         pixels[i + 3] = a;
     }
+
+    /// Copy of the pixels with straight alpha, for APIs that take it such as window icons.
+    ubyte[] straight() const
+    {
+        ubyte[] s = new ubyte[pixels.length];
+        for (size_t i = 0; i < pixels.length; i += 4)
+        {
+            uint a = pixels[i + 3];
+            foreach (size_t c; 0 .. 3)
+            {
+                s[i + c] = a == 0 ? 0 : cast(ubyte) min(255, (pixels[i + c] * 255 + a / 2) / a);
+            }
+            s[i + 3] = cast(ubyte) a;
+        }
+        return s;
+    }
 }
 
-/// Straight alpha becomes premultiplied, and pitch padding is dropped.
+/// Straight alpha becomes premultiplied and back, and pitch padding is dropped.
 unittest
 {
     ubyte[] rows = [255, 128, 0, 128, 9, 9, 9, 9, 10, 20, 30, 255, 9, 9, 9, 9];
@@ -107,6 +124,8 @@ unittest
     img.set(0, 0, 255, 255, 255, 0);
     img.changed();
     assert(img.pixels[0 .. 4] == [0, 0, 0, 0] && img.revision == r + 1);
+    img.set(0, 1, 100, 50, 0, 128);
+    assert(img.straight() == [0, 0, 0, 0, 100, 50, 0, 128]);
 }
 
 /// Channel `c` times alpha `a`, rounded.

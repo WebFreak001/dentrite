@@ -9,6 +9,8 @@ Known gaps, by area.
 - Popups stay inside the window, no OS popup windows.
 - File dialogs on Linux need an XDG portal or zenity, else they answer as
   cancelled.
+- A hidden window still draws the frames asked for, such as animations.
+- Window icons take one image, no extra sizes.
 
 ## Rendering
 

@@ -14,6 +14,7 @@ import dentrite.c.gl : GL_RENDERER, GL_VERSION, glGetString, loadGL;
 import dentrite.c.sdl;
 import dentrite.deadkeys : DeadKeys;
 import dentrite.geom;
+import dentrite.image : Image;
 import dentrite.node : CursorShape, Mod, PointerKind;
 import dentrite.platform;
 import std.algorithm.comparison : max;
@@ -75,7 +76,7 @@ private extern (C) void fileAnswered(void* userdata, const(char*)* list, int fil
 }
 
 /// SDL3 window with a GL 3.3 context or a software surface.
-final class SdlPlatform : Platform, FileDialogs, AccessAdapter
+final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl
 {
     Renderer renderer;              /// renderer drawing into this window, created along with it
 
@@ -94,6 +95,7 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter
     private AccessKitAdapter access; /// screen reader bridge with `WindowOptions.accessibility`, else null
     private Event queued;           /// event `wait` hands out next, after one translated into two
     private bool hasQueued;         /// `queued` is waiting
+    private float forced = 0;       /// `WindowOptions.scale`, 0 for the display's own
 
     /// Opens the window and sets up the renderer `o.renderer` names.
     this(WindowOptions o)
@@ -122,9 +124,9 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter
             SDL_GL_SetAttribute(SDL_GLAttr.doubleBuffer, 1);
             SDL_GL_SetAttribute(SDL_GLAttr.depthSize, 24);
         }
-        float forced = o.scale;
-        int w = forced > 0 ? cast(int)(o.width * forced) : o.width;
-        int h = forced > 0 ? cast(int)(o.height * forced) : o.height;
+        forced = o.scale;
+        int w = toWindow(o.width);
+        int h = toWindow(o.height);
         ulong flags = SDL_WINDOW_RESIZABLE | (useGL ? SDL_WINDOW_OPENGL : 0)
             | (forced > 0 ? 0 : SDL_WINDOW_HIGH_PIXEL_DENSITY) | (o.hidden ? SDL_WINDOW_HIDDEN : 0);
         win = SDL_CreateWindow(o.title.toStringz, w, h, flags);
@@ -151,6 +153,7 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter
             soft = new SoftwareRenderer;
             renderer = soft;
         }
+        setMinimumSize(o.minWidth, o.minHeight);
         readSizes();
         setWaker(&wakeSdl);
         if (fromStringz(SDL_GetCurrentVideoDriver()) == "wayland")
@@ -548,6 +551,63 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter
             cursors[shape] = SDL_CreateSystemCursor(map[shape]);
         }
         SDL_SetCursor(cursors[shape]);
+    }
+
+    /// SDL window, for SDL calls the library does not wrap.
+    SDL_Window* handle()
+    {
+        return win;
+    }
+
+    /// Logical pixels `n` in window coordinates, as the window size is given at creation.
+    private int toWindow(int n)
+    {
+        return forced > 0 ? cast(int)(n * forced) : n;
+    }
+
+    /// Sets the title bar text.
+    void setTitle(string title)
+    {
+        SDL_SetWindowTitle(win, title.toStringz);
+    }
+
+    /// Shows or hides the window.
+    void setVisible(bool on)
+    {
+        if (on)
+        {
+            SDL_ShowWindow(win);
+        }
+        else
+        {
+            SDL_HideWindow(win);
+        }
+    }
+
+    /// True unless hidden.
+    bool visible()
+    {
+        return (SDL_GetWindowFlags(win) & SDL_WINDOW_HIDDEN) == 0;
+    }
+
+    /// Sets the smallest size the user can resize to, in logical pixels, 0 for no limit.
+    void setMinimumSize(int w, int h)
+    {
+        SDL_SetWindowMinimumSize(win, toWindow(max(0, w)), toWindow(max(0, h)));
+    }
+
+    /// Sets the window icon from `img`, which SDL copies.
+    void setIcon(Image img)
+    {
+        ubyte[] px = img.straight();
+        SDL_Surface* s = SDL_CreateSurfaceFrom(img.width, img.height, SDL_PIXELFORMAT_ABGR8888, px.ptr,
+            img.width * 4);
+        if (s is null)
+        {
+            return;
+        }
+        SDL_SetWindowIcon(win, s);
+        SDL_DestroySurface(s);
     }
 
     /// Starts or stops SDL text events.

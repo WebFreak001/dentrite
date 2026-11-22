@@ -10,6 +10,7 @@ import core.time : Duration;
 import dentrite.access : AccessRequest;
 import dentrite.draw : FrameMesh;
 import dentrite.geom;
+import dentrite.image : Image;
 import dentrite.node : CursorShape, PointerKind;
 import dentrite.text : FontKind, GlyphAtlas;
 import dentrite.theme : Theme;
@@ -27,6 +28,8 @@ struct WindowOptions
     string title = "dentrite";   /// window title
     int width = 1280;            /// window width in logical pixels
     int height = 800;            /// window height in logical pixels
+    int minWidth;                /// smallest width the user can resize to, in logical pixels, 0 for no limit
+    int minHeight;               /// smallest height the user can resize to, in logical pixels, 0 for no limit
     float scale = 0;             /// display scale to use, 0 to take the display's own
     bool vsync = true;           /// wait for vertical blank
     double maxFps = 120;         /// frame rate cap, for when vsync does not limit it
@@ -115,6 +118,16 @@ interface FileDialogs
     /// Shows a dialog of `kind` over the window, starting in `start` if not null. `done` gets the chosen paths
     /// later on the UI thread, through an event of kind `call`, and none if cancelled or failed.
     void fileDialog(FileDialogKind kind, const(FileFilter)[] filters, string start, void delegate(string[]) done);
+}
+
+/// Platform whose window the app can change once open. Sizes are in logical pixels.
+interface WindowControl
+{
+    void setTitle(string title);       /// sets the title bar text
+    void setVisible(bool on);          /// shows or hides the window
+    bool visible();                    /// true unless hidden
+    void setMinimumSize(int w, int h); /// smallest size the user can resize to, 0 for no limit
+    void setIcon(Image icon);          /// sets the icon the window system shows
 }
 
 /// Window system side of a host: window, events, clipboard, cursor, presenting.
