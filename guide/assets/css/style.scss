@@ -1,0 +1,62 @@
+---
+---
+// Primer theme in the API reference palette, see tools/apidoc.css.
+@import "{{ site.theme }}";
+
+:root {
+    --bg: #fdfdfd;
+    --fg: #1d1d20;
+    --muted: #6a6a72;
+    --line: #e2e2e6;
+    --code-bg: #f3f3f5;
+    --link: #2758b8;
+    --keyword: #8a2f9e;
+    --string: #b2401c;
+    --comment: #5f7a5a;
+    --type: #0f6f78;
+    --number: #1f5fa8;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #1b1b1f;
+        --fg: #dcdce0;
+        --muted: #8e8e96;
+        --line: #33333a;
+        --code-bg: #25252b;
+        --link: #7fa8f0;
+        --keyword: #d48be6;
+        --string: #e59a72;
+        --comment: #8daa86;
+        --type: #5fc0c6;
+        --number: #8cb4f0;
+    }
+}
+
+body { background: var(--bg); color: var(--fg); }
+a { color: var(--link); }
+
+.markdown-body {
+    h1, h2 { border-bottom-color: var(--line); }
+    h6, blockquote { color: var(--muted); }
+    blockquote { border-left-color: var(--line); }
+    hr { background-color: var(--line); }
+    kbd { color: var(--fg); background-color: var(--code-bg); border-color: var(--line); }
+    table th, table td { border-color: var(--line); }
+    table tr { background-color: var(--bg); border-top-color: var(--line); }
+    table tr:nth-child(2n) { background-color: var(--code-bg); }
+    img { background-color: transparent; }
+    code, tt { background-color: color-mix(in srgb, var(--fg) 9%, transparent); }
+    pre code { background-color: transparent; }
+    pre, .highlight pre { background-color: var(--code-bg); color: var(--fg); }
+}
+
+.highlight {
+    background: transparent;
+    [class] { color: inherit; background: none; font-weight: normal; font-style: normal; }
+    .c, .cm, .c1, .cs, .cd, .cp { color: var(--comment); }
+    .k, .kc, .kd, .kn, .kp, .kr, .kv, .ow { color: var(--keyword); }
+    .kt, .nb, .nc, .bp { color: var(--type); }
+    .s, .s1, .s2, .sb, .sc, .sd, .se, .sh, .si, .sx, .sr, .ss { color: var(--string); }
+    .m, .mf, .mh, .mi, .mo, .mb, .mx, .il { color: var(--number); }
+}
