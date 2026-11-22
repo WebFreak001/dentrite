@@ -161,7 +161,8 @@ final class SoftwareRenderer : Renderer
             {
                 continue;
             }
-            uint[] row = pixels[cast(size_t) y * width + l .. cast(size_t) y * width + r + 1];
+            size_t at = cast(size_t) y * width;
+            uint[] row = pixels[at + cast(size_t) l .. at + cast(size_t) r + 1];
             if (sameColor && sameUV)
             {
                 span!(false, false, false)(row, s, cast(int) l, y, tex, 0, 0);

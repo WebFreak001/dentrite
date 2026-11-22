@@ -214,8 +214,17 @@ union SDL_Event
 
 static assert(SDL_Event.sizeof == 128);
 static assert(SDL_KeyboardEvent.sizeof == 40);
-static assert(SDL_MouseButtonEvent.sizeof == 40);
-static assert(SDL_TextEditingEvent.sizeof == 40);
+version (D_LP64)
+{
+    static assert(SDL_MouseButtonEvent.sizeof == 40);
+    static assert(SDL_TextEditingEvent.sizeof == 40);
+}
+else version (X86) version (linux)
+{
+    // i386 aligns 64-bit fields to 4.
+    static assert(SDL_MouseButtonEvent.sizeof == 36);
+    static assert(SDL_TextEditingEvent.sizeof == 32);
+}
 
 enum ushort SDL_KMOD_SHIFT = 0x0003; /// either shift
 enum ushort SDL_KMOD_CTRL = 0x00C0;  /// either ctrl

@@ -102,8 +102,17 @@ struct accesskit_action_request
     accesskit_opt_action_data data; /// payload
 }
 
-static assert(accesskit_action_request.sizeof == 80 && accesskit_action_request.target_node.offsetof == 24
-    && accesskit_action_request.data.offsetof == 32 && accesskit_action_data.sizeof == 40);
+version (D_LP64)
+{
+    static assert(accesskit_action_request.sizeof == 80 && accesskit_action_request.target_node.offsetof == 24
+        && accesskit_action_request.data.offsetof == 32 && accesskit_action_data.sizeof == 40);
+}
+else version (X86) version (linux)
+{
+    // i386 aligns 64-bit fields to 4.
+    static assert(accesskit_action_request.sizeof == 60 && accesskit_action_request.target_node.offsetof == 20
+        && accesskit_action_request.data.offsetof == 28 && accesskit_action_data.sizeof == 28);
+}
 
 enum : int
 {

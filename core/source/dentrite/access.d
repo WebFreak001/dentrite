@@ -9,6 +9,15 @@ import dentrite.geom : Rect;
 import dentrite.node : Node, Tree;
 import std.math : isNaN;
 
+/// 64-bit hash of `a` seeded with `b` (splitmix64 finalizer), same on 32 and 64-bit targets.
+ulong mixId(ulong a, ulong b) @safe pure nothrow @nogc
+{
+    ulong z = a ^ (b + 0x9e37_79b9_7f4a_7c15) * 0xbf58_476d_1ce4_e5b9;
+    z = (z ^ (z >> 30)) * 0xbf58_476d_1ce4_e5b9;
+    z = (z ^ (z >> 27)) * 0x94d0_49bb_1331_11eb;
+    return z ^ (z >> 31);
+}
+
 /// What a node is to an assistive technology.
 enum Role : ubyte
 {
@@ -419,7 +428,7 @@ final class AccessTree
     /// Id of item `i` of the node with id `id`. Bit 62 keeps it apart from other ids, bit 63 from islands.
     private static ulong partId(ulong id, size_t i)
     {
-        return (hashOf(i, id) | 1UL << 62) & ~(1UL << 63);
+        return (mixId(i, id) | 1UL << 62) & ~(1UL << 63);
     }
 
     /// Id of the nearest exposed node at or above `focus`, asking `AccessFocus` and `AccessParts` nodes first.

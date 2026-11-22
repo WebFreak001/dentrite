@@ -9,6 +9,7 @@
 module dentrite.immediate;
 
 import core.time : MonoTime;
+import dentrite.access : mixId;
 import dentrite.containers;
 import dentrite.draw;
 import dentrite.node;
@@ -500,7 +501,7 @@ final class Ui
     /// Access id of key `k` in this island. The top bit keeps it apart from the ids of retained nodes.
     private ulong accessIdFor(ulong k)
     {
-        return hashOf(k, accessSalt) | 1UL << 63;
+        return mixId(k, accessSalt) | 1UL << 63;
     }
 
     /// Root of the last pass, or null before the first.

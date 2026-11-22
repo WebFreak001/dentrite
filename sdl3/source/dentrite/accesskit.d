@@ -338,7 +338,7 @@ private Run[] runsOf(ulong id, string s)
                 q += stride(s, q);
             }
             // Bit 61 keeps run ids apart from the ids of nodes and parts.
-            runs ~= Run(p, q, (hashOf(chunk, hashOf(line, id)) | 1UL << 61) & ~(3UL << 62));
+            runs ~= Run(p, q, (mixId(chunk, mixId(line, id)) | 1UL << 61) & ~(3UL << 62));
             ++chunk;
             p = q;
         }
