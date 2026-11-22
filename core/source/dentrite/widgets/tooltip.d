@@ -130,7 +130,7 @@ final class Tooltips
     private bool quiet;      /// hidden by input until the pointer leaves `owner`
     private Point at;        /// pointer at the last update
     private MonoTime due;    /// when to show, or `MonoTime.init` for not pending
-    private MonoTime closed; /// when the last shown tooltip closed
+    private MonoTime closed; /// when the last shown tooltip closed, or `MonoTime.init` for none
 
     /// Tooltips over `t`.
     this(Tree t)
@@ -181,7 +181,7 @@ final class Tooltips
         anchor = null;
         MonoTime now = MonoTime.currTime;
         TooltipStyle s = tree.style!TooltipStyle();
-        bool quick = popup.isOpen || now - closed < msecs(cast(long) s.browse);
+        bool quick = popup.isOpen || (closed != MonoTime.init && now - closed < msecs(cast(long) s.browse));
         owner = o;
         quiet = false;
         popup.close();
