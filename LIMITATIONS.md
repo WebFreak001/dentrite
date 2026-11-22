@@ -29,7 +29,10 @@ Known gaps, by area.
 ## Text
 
 - Fallback glyphs take the slot font's line height and regular weight.
-- Color glyphs (emoji) draw nothing.
+- Color glyphs: CBDT bitmap (Noto) and COLRv0 (Segoe, Twemoji) fonts. COLRv1
+  and SVG fonts draw nothing, sbix (Apple) is untested and not in the system
+  list. Color glyphs snap to whole pixels, bitmaps scale up without smoothing.
+- Emoji presentation comes from a built-in table, not Unicode data.
 - System fonts come from a fixed path list, no fontconfig.
 - Input methods: the platform draws the candidate list. A press in a text
   area waits for the commit. Lists show no composition.

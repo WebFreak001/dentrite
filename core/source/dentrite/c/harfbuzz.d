@@ -7,6 +7,7 @@ extern (C) nothrow @nogc:
 
 struct hb_buffer_t; /// opaque buffer
 struct hb_font_t;   /// opaque font
+struct hb_face_t;   /// opaque face
 
 /// Shaped glyph: index and cluster.
 struct hb_glyph_info_t
@@ -46,6 +47,10 @@ void hb_shape(hb_font_t* font, hb_buffer_t* buf, const(hb_feature_t)* features, 
 hb_glyph_info_t* hb_buffer_get_glyph_infos(hb_buffer_t* buf, uint* length);         /// glyphs
 hb_glyph_position_t* hb_buffer_get_glyph_positions(hb_buffer_t* buf, uint* length); /// positions
 hb_font_t* hb_ft_font_create_referenced(FT_Face face);         /// font over a FreeType face
+hb_face_t* hb_ft_face_create_referenced(FT_Face face);         /// face over a FreeType face
+hb_font_t* hb_font_create(hb_face_t* face);                    /// font over a face, with OpenType metrics
+void hb_face_destroy(hb_face_t* face);                         /// frees a face
+void hb_font_set_scale(hb_font_t* font, int x, int y);         /// units per EM of positions
 void hb_ft_font_changed(hb_font_t* font);                      /// re-reads the face size
 void hb_font_destroy(hb_font_t* font);                         /// frees a font
 

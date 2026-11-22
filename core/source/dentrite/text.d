@@ -1,7 +1,8 @@
 /// Text rendering: font files, shaping with HarfBuzz, rasterizing with FreeType into one glyph atlas.
 ///
 /// Characters the slot's font lacks come from the first fallback file that has them, as runs shaped apart.
-/// NOTE: fallback glyphs use the slot font's line metrics, and color glyphs such as emoji draw nothing.
+/// Emoji prefer a fallback with color glyphs, which draw in their own colors at whole pixels.
+/// NOTE: fallback glyphs use the slot font's line metrics.
 ///
 /// Shaping runs at the physical pixel size, so runs and metrics are in physical
 /// pixels and callers divide by `ppp` for layout. Glyphs are rasterized with light
@@ -43,6 +44,8 @@ final class SizedFont
     float ascent;   /// physical pixels above the baseline
     float descent;  /// physical pixels below the baseline, positive
     float lineGap;  /// extra physical pixels between lines
+    bool color;     /// has color glyphs, such as emoji
+    float strikeScale = 1; /// physical pixels per bitmap pixel of a bitmap-only font, else 1
 }
 
 /// Shaped text in physical pixels from the run's pen start.
@@ -167,6 +170,7 @@ struct GlyphSlot
     short h;    /// bitmap height in texels
     short left; /// distance from the pen x to the left edge of the bitmap
     short top;  /// distance from the baseline up to the top edge of the bitmap
+    bool color; /// texels hold the glyph's own colors, drawn with a white vertex color
 }
 
 /// RGBA8 premultiplied atlas: a white block for untextured shapes, then glyphs packed in shelves.
@@ -232,9 +236,47 @@ final class GlyphAtlas
     GlyphSlot* place(GlyphKey key, int w, int h, int pitch, const(ubyte)* src, int left, int top,
         const ref ubyte[256] curve)
     {
+        GlyphSlot* s = reserve(key, w, h, left, top, false);
+        if (s is null || w == 0 || h == 0)
+        {
+            return s;
+        }
+        foreach (int row; 0 .. h)
+        {
+            const(ubyte)* line = src + row * pitch;
+            size_t at = (cast(size_t)(s.y + row) * width + s.x) * 4;
+            ubyte[] dst = pixels[at .. at + w * 4];
+            foreach (int col; 0 .. w)
+            {
+                ubyte c = curve[line[col]];
+                dst[col * 4 .. col * 4 + 4] = c;
+            }
+        }
+        return s;
+    }
+
+    /// Places a `w` by `h` premultiplied RGBA bitmap with packed rows. Null when out of space.
+    GlyphSlot* placeColor(GlyphKey key, int w, int h, const(ubyte)[] rgba, int left, int top)
+    {
+        GlyphSlot* s = reserve(key, w, h, left, top, true);
+        if (s is null || w == 0 || h == 0)
+        {
+            return s;
+        }
+        foreach (int row; 0 .. h)
+        {
+            size_t at = (cast(size_t)(s.y + row) * width + s.x) * 4;
+            pixels[at .. at + w * 4] = rgba[row * w * 4 .. (row + 1) * w * 4];
+        }
+        return s;
+    }
+
+    /// Slot for a `w` by `h` bitmap on the shelves, marked dirty. Null when out of space.
+    private GlyphSlot* reserve(GlyphKey key, int w, int h, int left, int top, bool color)
+    {
         if (w == 0 || h == 0)
         {
-            slots[key] = GlyphSlot(0, 0, 0, 0, cast(short) left, cast(short) top);
+            slots[key] = GlyphSlot(0, 0, 0, 0, cast(short) left, cast(short) top, color);
             return key in slots;
         }
         if (shelfX + w + 1 > width)
@@ -254,22 +296,12 @@ final class GlyphAtlas
         }
         int x = shelfX;
         int y = shelfY;
-        foreach (int row; 0 .. h)
-        {
-            const(ubyte)* line = src + row * pitch;
-            ubyte[] dst = pixels[((y + row) * width + x) * 4 .. ((y + row) * width + x + w) * 4];
-            foreach (int col; 0 .. w)
-            {
-                ubyte c = curve[line[col]];
-                dst[col * 4 .. col * 4 + 4] = c;
-            }
-        }
         shelfX += w + 1;
         shelfH = max(shelfH, h + 1);
         dirtyTop = min(dirtyTop, y);
         dirtyBottom = max(dirtyBottom, y + h);
         slots[key] = GlyphSlot(cast(short) x, cast(short) y, cast(short) w, cast(short) h,
-            cast(short) left, cast(short) top);
+            cast(short) left, cast(short) top, color);
         return key in slots;
     }
 
@@ -437,8 +469,23 @@ final class TextSystem
             return null;
         }
         f.id = cast(uint) sized.length;
-        FT_Set_Char_Size(f.face, 0, px64, 72, 72);
-        f.hb = hb_ft_font_create_referenced(f.face);
+        f.color = (f.face.face_flags & FT_FACE_FLAG_COLOR) != 0;
+        if ((f.face.face_flags & FT_FACE_FLAG_SCALABLE) == 0 && f.face.num_fixed_sizes > 0)
+        {
+            // HarfBuzz reads advances from the font tables, FreeType only knows the strike size.
+            int strike = nearestStrike(f.face, px64);
+            FT_Select_Size(f.face, strike);
+            f.strikeScale = px64 / cast(float) f.face.available_sizes[strike].y_ppem;
+            hb_face_t* hf = hb_ft_face_create_referenced(f.face);
+            f.hb = hb_font_create(hf);
+            hb_face_destroy(hf);
+            hb_font_set_scale(f.hb, px64, px64);
+        }
+        else
+        {
+            FT_Set_Char_Size(f.face, 0, px64, 72, 72);
+            f.hb = hb_ft_font_create_referenced(f.face);
+        }
         float scale = f.px / f.face.units_per_EM;
         f.ascent = f.face.ascender * scale;
         f.descent = -f.face.descender * scale;
@@ -496,7 +543,9 @@ final class TextSystem
         {
             size_t at = i;
             dchar c = decode!(Yes.useReplacementDchar)(r.text, i);
-            SizedFont want = fontFor(c, f, current, size);
+            size_t j = i;
+            dchar next = j < r.text.length ? decode!(Yes.useReplacementDchar)(r.text, j) : 0;
+            SizedFont want = fontFor(c, next, f, current, size);
             if (current !is null && want !is current)
             {
                 shapePart(r, current, start, at, tabular);
@@ -508,15 +557,26 @@ final class TextSystem
         return r;
     }
 
-    /// Font for `c`: `current` for marks and joiners after it, then `f`, then the first fallback having it, then
-    /// `f` for its missing glyph.
-    private SizedFont fontFor(dchar c, SizedFont f, SizedFont current, float size)
+    /// Font for `c` followed by `next`: `current` for marks and joiners after it, a color fallback for emoji,
+    /// then `f`, then the first fallback having it, then `f` for its missing glyph.
+    private SizedFont fontFor(dchar c, dchar next, SizedFont f, SizedFont current, float size)
     {
         bool joins = isMark(c) || c == 0x200C || c == 0x200D || (c >= 0xFE00 && c <= 0xFE0F)
-            || (c >= 0xE0100 && c <= 0xE01EF);
+            || (c >= 0xE0020 && c <= 0xE007F) || (c >= 0xE0100 && c <= 0xE01EF);
         if (current !is null && joins)
         {
             return current;
+        }
+        if (next != 0xFE0E && (next == 0xFE0F || isEmoji(c)))
+        {
+            foreach (size_t i; 0 .. fallbacks.length)
+            {
+                SizedFont g = fallback(i, size);
+                if (g !is null && g.color && FT_Get_Char_Index(g.face, c) != 0)
+                {
+                    return g;
+                }
+            }
         }
         if (c < 0x80 || fallbacks.length == 0 || FT_Get_Char_Index(f.face, c) != 0)
         {
@@ -570,6 +630,10 @@ final class TextSystem
     /// Atlas slot of glyph `glyph` of `f` at subpixel `bin`, rasterized on first use. Null when the atlas is full.
     GlyphSlot* glyph(SizedFont f, uint glyph, ubyte bin)
     {
+        if (f.color)
+        {
+            bin = 0;
+        }
         GlyphKey key = GlyphKey(f.id, glyph, bin);
         if (recentGeneration != atlas.generation)
         {
@@ -596,6 +660,10 @@ final class TextSystem
     /// Rasterizes the glyph of `key` in `f` into the atlas. Null when the atlas is full.
     private GlyphSlot* rasterize(SizedFont f, GlyphKey key)
     {
+        if (f.color)
+        {
+            return rasterizeColor(f, key);
+        }
         uint glyph = key.glyph;
         ubyte bin = key.bin;
         FT_Vector delta = FT_Vector(bin * 64 / subpixelBins, 0);
@@ -617,6 +685,33 @@ final class TextSystem
         }
         return atlas.place(key, g.bitmap.width, g.bitmap.rows, g.bitmap.pitch, g.bitmap.buffer,
             g.bitmap_left, g.bitmap_top, curve);
+    }
+
+    /// Rasterizes the glyph of `key` in color font `f` at whole pixels, bitmap strikes scaled to `f.px`. Glyphs
+    /// without color take the text color. Null when the atlas is full.
+    private GlyphSlot* rasterizeColor(SizedFont f, GlyphKey key)
+    {
+        if (FT_Load_Glyph(f.face, key.glyph, FT_LOAD_COLOR) != 0
+            || FT_Render_Glyph(f.face.glyph, FT_RENDER_MODE_NORMAL) != 0)
+        {
+            return atlas.place(key, 0, 0, 0, null, 0, 0, curve);
+        }
+        FT_GlyphSlot g = f.face.glyph;
+        ++rasterized;
+        if (g.bitmap.pixel_mode == FT_PIXEL_MODE_GRAY && f.strikeScale == 1)
+        {
+            return atlas.place(key, g.bitmap.width, g.bitmap.rows, g.bitmap.pitch, g.bitmap.buffer,
+                g.bitmap_left, g.bitmap_top, curve);
+        }
+        if (g.bitmap.pixel_mode != FT_PIXEL_MODE_BGRA || g.bitmap.width == 0 || g.bitmap.rows == 0)
+        {
+            return atlas.place(key, 0, 0, 0, null, 0, 0, curve);
+        }
+        int w;
+        int h;
+        ubyte[] rgba = scaledRGBA(g.bitmap, f.strikeScale, w, h);
+        return atlas.placeColor(key, w, h, rgba, cast(int) round(g.bitmap_left * f.strikeScale),
+            cast(int) round(g.bitmap_top * f.strikeScale));
     }
 
     /// Ends a frame: clears a full atlas and drops runs unused for `keep` frames.
@@ -652,7 +747,99 @@ final class TextSystem
     }
 }
 
-/// Well-known system fonts that exist here, in order: wide coverage first, then CJK, then symbols.
+/// Index of the smallest strike of `face` at least `px64` (26.6) tall, else the tallest.
+private int nearestStrike(FT_Face face, uint px64)
+{
+    int best = -1;
+    int tallest;
+    foreach (int i; 0 .. face.num_fixed_sizes)
+    {
+        FT_Pos ppem = face.available_sizes[i].y_ppem;
+        if (ppem >= px64 && (best < 0 || ppem < face.available_sizes[best].y_ppem))
+        {
+            best = i;
+        }
+        if (ppem > face.available_sizes[tallest].y_ppem)
+        {
+            tallest = i;
+        }
+    }
+    return best < 0 ? tallest : best;
+}
+
+/// Premultiplied RGBA of BGRA bitmap `b` scaled by `s` with a box filter, `w` by `h` pixels.
+private ubyte[] scaledRGBA(const ref FT_Bitmap b, float s, out int w, out int h)
+{
+    int sw = b.width;
+    int sh = b.rows;
+    w = max(1, cast(int) round(sw * s));
+    h = max(1, cast(int) round(sh * s));
+    ubyte[] o = new ubyte[w * h * 4];
+    float fx = cast(float) sw / w;
+    float fy = cast(float) sh / h;
+    foreach (int y; 0 .. h)
+    {
+        float y0 = y * fy;
+        float y1 = y0 + fy;
+        foreach (int x; 0 .. w)
+        {
+            float x0 = x * fx;
+            float x1 = x0 + fx;
+            float[4] sum = 0;
+            for (int sy = cast(int) y0; sy < y1 && sy < sh; ++sy)
+            {
+                float wy = min(y1, sy + 1) - max(y0, sy);
+                const(ubyte)* row = b.buffer + sy * b.pitch;
+                for (int sx = cast(int) x0; sx < x1 && sx < sw; ++sx)
+                {
+                    float wt = wy * (min(x1, sx + 1) - max(x0, sx));
+                    const(ubyte)* p = row + sx * 4;
+                    sum[0] += p[2] * wt;
+                    sum[1] += p[1] * wt;
+                    sum[2] += p[0] * wt;
+                    sum[3] += p[3] * wt;
+                }
+            }
+            foreach (size_t k; 0 .. 4)
+            {
+                o[(y * w + x) * 4 + k] = cast(ubyte) min(255f, round(sum[k] / (fx * fy)));
+            }
+        }
+    }
+    return o;
+}
+
+/// True if `c` shows as an emoji without a variation selector: Unicode's Emoji_Presentation in the BMP, and
+/// the pictograph and regional indicator blocks.
+private bool isEmoji(dchar c)
+{
+    static immutable dchar[2][] bmp = [[0x231A, 0x231B], [0x23E9, 0x23EC], [0x23F0, 0x23F0], [0x23F3, 0x23F3],
+        [0x25FD, 0x25FE], [0x2614, 0x2615], [0x2648, 0x2653], [0x267F, 0x267F], [0x2693, 0x2693],
+        [0x26A1, 0x26A1], [0x26AA, 0x26AB], [0x26BD, 0x26BE], [0x26C4, 0x26C5], [0x26CE, 0x26CE],
+        [0x26D4, 0x26D4], [0x26EA, 0x26EA], [0x26F2, 0x26F3], [0x26F5, 0x26F5], [0x26FA, 0x26FA],
+        [0x26FD, 0x26FD], [0x2705, 0x2705], [0x270A, 0x270B], [0x2728, 0x2728], [0x274C, 0x274C],
+        [0x274E, 0x274E], [0x2753, 0x2755], [0x2757, 0x2757], [0x2795, 0x2797], [0x27B0, 0x27B0],
+        [0x27BF, 0x27BF], [0x2B1B, 0x2B1C], [0x2B50, 0x2B50], [0x2B55, 0x2B55]];
+    if (c < 0x231A)
+    {
+        return false;
+    }
+    if (c >= 0x1F000)
+    {
+        return c == 0x1F004 || c == 0x1F0CF || c == 0x1F18E || (c >= 0x1F191 && c <= 0x1F19A)
+            || (c >= 0x1F1E6 && c <= 0x1F1FF) || (c >= 0x1F300 && c <= 0x1FAFF);
+    }
+    foreach (ref const dchar[2] r; bmp)
+    {
+        if (c >= r[0] && c <= r[1])
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+/// Well-known system fonts that exist here, in order: wide coverage first, then CJK, then symbols and emoji.
 string[] systemFallbackFonts()
 {
     import std.file : exists;
@@ -663,7 +850,7 @@ string[] systemFallbackFonts()
     {
         string dir = environment.get("WINDIR", `C:\Windows`) ~ `\Fonts\`;
         foreach (string f; ["segoeui.ttf", "arial.ttf", "msyh.ttc", "YuGothR.ttc", "malgun.ttf", "Nirmala.ttf",
-            "seguisym.ttf"])
+            "seguisym.ttf", "seguiemj.ttf"])
         {
             candidates ~= dir ~ f;
         }
@@ -680,7 +867,7 @@ string[] systemFallbackFonts()
             "dejavu-sans-fonts/DejaVuSans.ttf", "noto-cjk/NotoSansCJK-Regular.ttc",
             "google-noto-cjk/NotoSansCJK-Regular.ttc", "noto/NotoSansCJK-Regular.ttc",
             "droid/DroidSansFallbackFull.ttf", "wqy/wqy-microhei.ttc", "noto/NotoSansSymbols-Regular.ttf",
-            "noto/NotoSansSymbols2-Regular.ttf"])
+            "noto/NotoSansSymbols2-Regular.ttf", "noto/NotoColorEmoji.ttf"])
         {
             foreach (string dir; ["/usr/share/fonts/truetype/", "/usr/share/fonts/opentype/", "/usr/share/fonts/"])
             {
@@ -720,6 +907,13 @@ version (unittest)
     {
         return new TextSystem(["fonts/Inter-Regular.otf", "fonts/Inter-SemiBold.otf",
             "fonts/JetBrainsMono-Regular.ttf"]);
+    }
+
+    /// Text system over `fonts/` with the emoji subset as its one fallback.
+    TextSystem testEmojiText()
+    {
+        return new TextSystem(["fonts/Inter-Regular.otf", "fonts/Inter-SemiBold.otf",
+            "fonts/JetBrainsMono-Regular.ttf"], ["fonts/NotoColorEmoji-Subset.ttf"]);
     }
 }
 
@@ -849,4 +1043,29 @@ unittest
     assert(t.shape(FontKind.mono, 14, "ab").faces.length == 0, "one font, no faces");
     ShapedRun none = t.shape(FontKind.mono, 14, "中");
     assert(none.glyphs == [0] && none.faces.length == 0);
+}
+
+// Emoji come from the color fallback as one glyph per sequence, the bitmap strike scaled to the text size, in
+// their own colors and at whole pixels.
+unittest
+{
+    TextSystem t = testEmojiText();
+    scope (exit)
+    {
+        t.dispose();
+    }
+    ShapedRun r = t.shape(FontKind.ui, 14, "a😀⭐");
+    assert(r.glyphs.length == 3 && r.faces.length == 3 && r.faces[0] is r.font);
+    SizedFont e = r.faces[1];
+    assert(e.color && r.faces[2] is e && e.strikeScale > 0.12 && e.strikeScale < 0.13, "109 px strike at 14 px");
+    float adv = r.pens[2] - r.pens[1];
+    assert(adv > 14 * 1.2 && adv < 14 * 1.3, format("%s", adv));
+    GlyphSlot* s = t.glyph(e, r.glyphs[1], 3);
+    assert(s.color && s.w >= 16 && s.w <= 19 && s.h >= 15 && s.h <= 18 && s.top > 10, format("%s", *s));
+    assert(t.glyph(e, r.glyphs[1], 0) is s, "one subpixel bin");
+    size_t at = (cast(size_t)(s.y + s.h / 4) * t.atlas.width + s.x + s.w / 2) * 4;
+    const(ubyte)[] px = t.atlas.pixels[at .. at + 4];
+    assert(px[3] == 255 && px[0] > 200 && px[1] > 150 && px[2] < 100, format("yellow forehead %s", px));
+    assert(t.shape(FontKind.ui, 14, "👍🏽").glyphs.length == 1, "skin tone");
+    assert(t.shape(FontKind.ui, 14, "🇯🇵").glyphs.length == 1, "flag");
 }

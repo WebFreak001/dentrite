@@ -220,6 +220,7 @@ Node textPage()
             label("Characters the theme font lacks come from fallback files or system fonts."),
             label("Ελληνικά, Кириллица, 中文, 日本語, 한국어, ∑ ∫ ≠ → ★ ☂"),
             label("Mono: Ελληνικά 中文 ★", "mono"),
+            label("Emoji: 😀 ⭐ 👍🏽 🇯🇵 ❤️ 1️⃣ 👩‍💻 ★ ☂"),
         )),
         section("Alignment", column(gap: 6, cross: CrossAlign.start)(
             aligned("Start", TextAlign.start),

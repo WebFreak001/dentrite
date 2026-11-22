@@ -46,7 +46,7 @@ Design: path C of `research/report.html`, section 11.
 | `examples/debugger/` | Debugger-shaped demo. Its README has timings. |
 | `examples/gallery/` | One page per widget, with screenshots. |
 | `guide/` | Usage guide, a chapter per topic, see `guide/README.md`. |
-| `fonts/` | Inter and JetBrains Mono, for tests and examples. |
+| `fonts/` | Inter, JetBrains Mono and a few Noto Color Emoji, for tests and examples. |
 | `research/` | Architecture study, see `research/README.md`. |
 
 ## Build

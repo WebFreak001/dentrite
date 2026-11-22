@@ -124,7 +124,7 @@ struct FT_FaceRec
     char* family_name;         /// family
     char* style_name;          /// style
     int num_fixed_sizes;       /// bitmap strikes
-    void* available_sizes;     /// strikes
+    FT_Bitmap_Size* available_sizes; /// strikes, `num_fixed_sizes` of them
     int num_charmaps;          /// charmaps
     void* charmaps;            /// charmaps
     FT_Generic generic;        /// user data
@@ -144,6 +144,16 @@ struct FT_FaceRec
 
 alias FT_Face = FT_FaceRec*; /// face handle
 
+/// Bitmap strike of a face.
+struct FT_Bitmap_Size
+{
+    short height; /// vertical distance in pixels
+    short width;  /// average width in pixels
+    FT_Pos size;  /// nominal size, 26.6
+    FT_Pos x_ppem; /// horizontal pixels per EM, 26.6
+    FT_Pos y_ppem; /// vertical pixels per EM, 26.6
+}
+
 version (X86_64) version (linux)
 {
     static assert(FT_FaceRec.glyph.offsetof == 152 && FT_FaceRec.size.offsetof == 160);
@@ -156,9 +166,13 @@ enum int FT_LOAD_DEFAULT = 0;           /// hinted, default target
 enum int FT_LOAD_NO_HINTING = 2;        /// unhinted outlines
 enum int FT_LOAD_RENDER = 4;            /// render after loading
 enum int FT_LOAD_TARGET_LIGHT = 0x10000; /// vertical-only hinting
+enum int FT_LOAD_COLOR = 1 << 20;     /// color bitmaps and color layers as BGRA
 enum int FT_RENDER_MODE_NORMAL = 0;     /// 8-bit gray
 enum int FT_RENDER_MODE_LIGHT = 1;      /// 8-bit gray, light hinting
 enum ubyte FT_PIXEL_MODE_GRAY = 2;      /// 8-bit gray bitmap
+enum ubyte FT_PIXEL_MODE_BGRA = 7;      /// premultiplied BGRA bitmap
+enum c_long FT_FACE_FLAG_SCALABLE = 1;   /// has outlines
+enum c_long FT_FACE_FLAG_COLOR = 1 << 14; /// has color glyphs
 
 FT_Error FT_Init_FreeType(FT_Library* lib);            /// new library
 FT_Error FT_Done_FreeType(FT_Library lib);             /// frees the library
@@ -167,6 +181,7 @@ FT_Error FT_New_Memory_Face(FT_Library lib, const(ubyte)* base, c_long size, c_l
 FT_Error FT_New_Face(FT_Library lib, const(char)* path, c_long index, FT_Face* face); /// face from a font file
 FT_Error FT_Done_Face(FT_Face face);                   /// frees a face
 FT_Error FT_Set_Char_Size(FT_Face face, FT_F26Dot6 w, FT_F26Dot6 h, uint hres, uint vres); /// sets the size
+FT_Error FT_Select_Size(FT_Face face, int strike); /// picks bitmap strike `strike` as the size
 FT_Error FT_Load_Glyph(FT_Face face, uint glyph, int flags); /// loads into the slot
 FT_Error FT_Render_Glyph(FT_GlyphSlot slot, int mode); /// renders the slot
 void FT_Set_Transform(FT_Face face, FT_Matrix* matrix, FT_Vector* delta); /// transform applied on load

@@ -48,7 +48,8 @@ What each part does:
 - `WindowOptions.fonts` takes three files: body text, strong text (buttons,
   headers) and monospace. No font is built in. `fonts/` in the repository
   has Inter and JetBrains Mono with their licenses. Characters missing from
-  them come from `fallbackFonts`, then from well-known system fonts.
+  them come from `fallbackFonts`, then from well-known system fonts. Emoji
+  prefer a color font among those, such as Noto Color Emoji.
 - `scope Window w` opens the window and closes it at scope exit. One window
   per process for now.
 - The UI is built once, inside `effectScope`. Builders like `label` and

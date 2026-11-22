@@ -843,6 +843,7 @@ struct Tessellator
         float ox = c.origin.x * ppp;
         float baseline = round(c.origin.y * ppp);
         uint color = c.fill.premul;
+        uint white = (color >> 24) * 0x01010101u;
         foreach (size_t i; c.first .. c.last)
         {
             int pen;
@@ -861,10 +862,11 @@ struct Tessellator
             float y0 = baseline + round(run.ys[i]) - s.top;
             float x1 = x0 + s.w;
             float y1 = y0 + s.h;
-            uint b = vertex(x0, y0, s.x, s.y, color);
-            vertex(x1, y0, s.x + s.w, s.y, color);
-            vertex(x1, y1, s.x + s.w, s.y + s.h, color);
-            vertex(x0, y1, s.x, s.y + s.h, color);
+            uint tint = s.color ? white : color;
+            uint b = vertex(x0, y0, s.x, s.y, tint);
+            vertex(x1, y0, s.x + s.w, s.y, tint);
+            vertex(x1, y1, s.x + s.w, s.y + s.h, tint);
+            vertex(x0, y1, s.x, s.y + s.h, tint);
             quad(b, b + 1, b + 2, b + 3);
         }
     }
@@ -1375,4 +1377,22 @@ version (unittest)
         }
         return ts;
     }
+}
+
+// Color glyphs keep their texels: their quads take the text alpha only, other glyphs the text color.
+unittest
+{
+    TextSystem ts = testEmojiText();
+    scope (exit)
+    {
+        ts.dispose();
+    }
+    DrawList l;
+    l.text(ts.shape(FontKind.ui, 14, "a😀"), Point(10, 20), Color(255, 0, 0, 128));
+    FrameMesh m = new FrameMesh;
+    Tessellator t;
+    t.text = ts;
+    t.run(l, m, 200, 200);
+    assert(m.vertices.length == 8);
+    assert(m.vertices[0].rgba == 0x80000080 && m.vertices[4].rgba == 0x80808080);
 }
