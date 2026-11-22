@@ -1,0 +1,41 @@
+# Runs every test suite with DMD and LDC, and checks the guide snippets against their sources.
+name: Test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # NOTE: Debian for libsdl3-dev, Ubuntu 24.04 lacks it
+    container: debian:trixie
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [dmd-latest, ldc-latest]
+    steps:
+      - name: Packages
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl xz-utils git gcc libc6-dev \
+            libsdl3-dev libfreetype-dev libharfbuzz-dev
+      - uses: actions/checkout@v5
+      - uses: dlang-community/setup-dlang@v2
+        with:
+          compiler: ${{ matrix.compiler }}
+      - name: Library
+        run: dub test
+      - name: Gallery
+        run: dub test
+        working-directory: examples/gallery
+      - name: Debugger
+        run: dub test
+        working-directory: examples/debugger
+      - name: Guide examples
+        run: dub test
+        working-directory: guide/examples
+      - name: Guide snippets
+        run: perl tools/sync-snippets.pl --check *.md
+        working-directory: guide
