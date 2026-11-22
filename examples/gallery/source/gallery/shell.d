@@ -29,7 +29,7 @@ Node galleryUi(Host w, Gallery g, Page[] ps, Signal!size_t current)
     return column()(
         menus(w, g),
         expanded(row(cross: CrossAlign.stretch)(
-            sized(w: 170)(panel(variant: "pane")(pad(x: 0, y: 8)(column()(items)))),
+            sized(w: 170)(panel(variant: "pane")(scroll()(pad(x: 0, y: 8)(column()(items))))),
             vrule(),
             expanded(holder),
         )),
