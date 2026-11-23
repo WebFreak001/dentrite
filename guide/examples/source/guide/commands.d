@@ -1,11 +1,13 @@
-/// Chapter 6: commands with shortcuts, menus, a context menu, a dialog and tooltips.
+/// Chapter 6: commands with shortcuts, menus, a context menu, a dialog, tooltips and a tray icon.
 module guide.commands;
 
 import dentrite.command;
 import dentrite.containers;
 import dentrite.host : Host;
+import dentrite.image : Image;
 import dentrite.node;
 import dentrite.signals;
+import dentrite.tray : Tray, tray;
 import dentrite.widgets.button;
 import dentrite.widgets.dialog;
 import dentrite.widgets.icons;
@@ -141,4 +143,47 @@ unittest
     h.injectKey(Key.enter);
     h.frame();
     assert(n.text.peek == "", "Enter presses the main button");
+}
+
+/// Tray icon of `h` with a menu that shows or hides the window and quits. While it shows, closing the window hides
+/// it. Null without a tray.
+Tray notesTray(Host h, Image icon)
+{
+    Command show = command("&Show window", () { h.visible = h.visible == false; }, checked: () => h.visible);
+    Tray t = h.tray(icon: icon, tooltip: "Notes")(menuItem(show), menuSeparator(),
+        menuItem("&Quit", () { h.running = false; }));
+    if (t !is null)
+    {
+        h.onCloseRequest = () {
+            h.visible = false;
+            return false;
+        };
+    }
+    return t;
+}
+
+// Closing hides to the tray, its first entry brings the window back and the last quits.
+unittest
+{
+    import dentrite.headless : HeadlessPlatform, HeadlessTray;
+    import dentrite.platform : Event, EventKind;
+    import guide.harness;
+
+    Host h = testHost();
+    scope (exit)
+    {
+        h.close();
+    }
+    HeadlessPlatform p = cast(HeadlessPlatform) h.platform;
+    assert(notesTray(h, null) !is null);
+    HeadlessTray t = p.trays[0];
+    Event close = Event(EventKind.close);
+    h.handle(close);
+    assert(h.running && h.visible == false);
+    t.press(0);
+    h.pump();
+    assert(h.visible);
+    t.press(2);
+    h.pump();
+    assert(h.running == false);
 }

@@ -17,6 +17,7 @@ import dentrite.node;
 import dentrite.signals;
 import dentrite.sdlimage : canLoadImages, loadImage;
 import dentrite.theme : Variants;
+import dentrite.tray : Tray, tray;
 import dentrite.widgets.button;
 import dentrite.widgets.checkbox;
 import dentrite.widgets.combobox;
@@ -46,8 +47,10 @@ import std.range : iota;
 import std.math : abs, sin, sqrt;
 import std.string : toLower;
 
-/// Styles the gallery theme may set: the library's and its own button variant.
-alias GalleryStyles = AliasSeq!(LibraryStyles, Variants!(ButtonStyle, "large"));
+/// Styles the gallery theme may set: the library's, its own button variant and the chat page's.
+alias GalleryStyles = AliasSeq!(LibraryStyles, Variants!(ButtonStyle, "large"),
+    Variants!(PanelStyle, "bubble", "bubbleMine"),
+    Variants!(TextStyle, "bubbleMine", "bubbleTime", "name0", "name1", "name2", "name3"));
 
 /// Gallery page: sidebar title, one line about it, and its content.
 struct Page
@@ -97,6 +100,8 @@ Page[] pages(Gallery g)
         Page("Tabs", "Tab views over pages, and tab bars with closable tabs.", () => tabsPage()),
         Page("Menus", "Menu bar, popup menus from a button, context menus.", () => menusPage(g)),
         Page("Dialogs", "Modal dialogs over a scrim, and the system's file dialogs.", () => dialogsPage(g)),
+        Page("Tray icon", "An icon in the system tray with a menu that brings the window back.",
+            () => trayPage(g)),
         Page("Tooltips", "Text shown after resting the pointer on a node.", () => tooltipsPage()),
         Page("Lists", "Keyed rows rebuilt from a signal, and a virtual list of 100,000 rows.", () => listsPage()),
         Page("Chat feed", "A feed that follows new messages, loads older ones above and caps what it keeps.",
@@ -435,41 +440,64 @@ private Node bigRow(Signal!size_t selected, size_t delegate() r)
 }
 
 
+/// Senders of the sample chat messages, each with a name color in the theme.
+private immutable string[] chatAuthors = ["Ada", "Brook", "Cyd", "Dee"];
+
 /// Message of the chat page.
 private struct Message
 {
     long id;       /// order, older messages lower
     string author; /// sender
-    string text;   /// body, wrapped in its row
+    string text;   /// body, wrapped in its bubble
+    bool first;    /// first of a run from one sender, which shows the name and time
 }
 
-/// Sample message `id`, with a body whose length varies with the id.
+/// Sample message `id`, with a body whose length varies with the id. Senders write two or three in a row, and
+/// the next run is always someone else, since `run * 2 + bit` differs by 1 to 3.
 private Message sampleMessage(long id)
 {
-    static immutable string[] authors = ["Ada", "Brook", "Cyd", "Dee"];
     static immutable string[] words = ["the", "build", "passed", "again", "after", "moving", "rows", "into", "a",
         "pool", "so", "memory", "stays", "flat", "while", "messages", "keep", "coming", "in"];
     ulong h = cast(ulong) id * 2_654_435_761;
     string[] w;
-    foreach (size_t k; 0 .. 3 + (h >> 7) % 45)
+    foreach (size_t k; 0 .. 2 + (h >> 7) % 30)
     {
         w ~= words[((h ^ (k * 0x9E37_79B9_7F4A_7C15)) >> 29) % words.length];
     }
-    return Message(id, authors[(h >> 3) % authors.length], format("#%d: %s", id, w.join(" ")));
+    long run = id >= 0 ? id * 2 / 5 : (id * 2 - 4) / 5;
+    long bit = (cast(ulong) run * 0x9E37_79B9_7F4A_7C15) >> 63;
+    return Message(id, chatAuthors[((run * 2 + bit) % 4 + 4) % 4], w.join(" "));
+}
+
+/// `ms` with `first` set on each message whose sender differs from the one before, changed in place.
+private Message[] grouped(Message[] ms)
+{
+    foreach (size_t i, ref Message m; ms)
+    {
+        m.first = i == 0 || ms[i - 1].author != m.author;
+    }
+    return ms;
+}
+
+/// Time of day shown for message `id`, three messages a minute from noon.
+private string clockOf(long id)
+{
+    long t = ((12 * 60 + id / 3) % 1440 + 1440) % 1440;
+    return format("%02d:%02d", t / 60, t % 60);
 }
 
 /// Chat feed: a virtual list following the end, older messages loaded above, and a cap on kept messages.
 Node chatPage()
 {
     enum size_t keep = 1000; /// messages kept once twice as many arrived
-    Signal!(Message[]) log = signal(iota(-200L, 0L).map!sampleMessage.array);
+    Signal!(Message[]) log = signal(grouped(iota(-200L, 0L).map!sampleMessage.array));
     Signal!string draft = signal("");
     long next = 0;
     /// Appends `more`, dropping the oldest past the cap.
     void post(Message[] more)
     {
         Message[] all = log.peek ~ more;
-        log.set(all.length > 2 * keep ? all[$ - keep .. $] : all);
+        log.set(grouped(all.length > 2 * keep ? all[$ - keep .. $] : all));
     }
 
     /// Sends the draft as a message from "You".
@@ -486,7 +514,7 @@ Node chatPage()
     void loadOlder()
     {
         long oldest = log.peek.length > 0 ? log.peek[0].id : next;
-        log.set(iota(oldest - 50, oldest).map!sampleMessage.array ~ log.peek);
+        log.set(grouped(iota(oldest - 50, oldest).map!sampleMessage.array ~ log.peek));
     }
 
     /// Appends 100 sample messages.
@@ -501,7 +529,7 @@ Node chatPage()
         key: (Message m) => m.id, row: (Message delegate() m) => messageRow(m));
     return column(gap: 22)(
         section("Feed", column(gap: 8)(
-            narrow(520, sized(h: 320)(panel(variant: "pane")(scroll(follow: true)(feed)))),
+            narrow(520, sized(h: 360)(panel(variant: "pane")(scroll(follow: true)(feed)))),
             row(gap: 8)(
                 sized(w: 240)(shortcuts([sendCmd])(textBox(draft, placeholder: "Message", accessName: "Message"))),
                 button("Send", onClick: &send),
@@ -520,14 +548,104 @@ Node chatPage()
     );
 }
 
-/// Row of the chat feed: the author over the wrapped body of the message `m` returns.
+/// Line of the chat feed holding one bubble, at most three quarters of the width, on the right for the user's
+/// own messages. A run from one sender sits closer together.
+private final class BubbleLine : Node
+{
+    bool mine;  /// the user's own message, placed on the right
+    bool first; /// first of a run, with more space above
+
+    /// Wraps `bubble`.
+    this(Node bubble)
+    {
+        add(bubble);
+    }
+
+    /// Bubble at its natural width up to three quarters of the line, clear of the scroll bar on the right.
+    protected override Size performLayout(Constraints c)
+    {
+        import std.math : isInfinity;
+
+        float w = isInfinity(c.maxW) ? c.minW : c.maxW;
+        float inner = max(0f, w - 28);
+        Size s = children[0].layout(Constraints(0, inner * 0.75f, 0, float.infinity));
+        float above = first ? 10 : 3;
+        children[0].offset = Point(mine ? 10 + inner - s.w : 10, above);
+        return Size(w, above + s.h + 3);
+    }
+}
+
+/// Inside of a chat bubble: the text, under the sender's name on the left and the time on the right when the
+/// head shows. As wide as the wider of the text and the head.
+private final class BubbleBody : Node
+{
+    private Node name; /// sender's name
+    private Node time; /// time of day
+    private Node text; /// message body
+
+    /// Creates the body with its head shown.
+    this(Node name, Node time, Node text)
+    {
+        this.name = name;
+        this.time = time;
+        this.text = text;
+        setChildren([name, time, text]);
+    }
+
+    /// Shows or hides the name and time.
+    void showHead(bool on)
+    {
+        setChildren(on ? [name, time, text] : [text]);
+    }
+
+    /// Text wrapped to the width allowed, head spread over the bubble's width.
+    protected override Size performLayout(Constraints c)
+    {
+        Size t = text.layout(Constraints(0, c.maxW, 0, float.infinity));
+        if (children.length == 1)
+        {
+            text.offset = Point.init;
+            return t;
+        }
+        Constraints loose = Constraints(0, float.infinity, 0, float.infinity);
+        Size n = name.layout(loose);
+        Size m = time.layout(loose);
+        float w = min(c.maxW, max(t.w, n.w + 16 + m.w));
+        float headH = max(n.h, m.h);
+        name.offset = Point(0, headH - n.h);
+        time.offset = Point(w - m.w, headH - m.h);
+        text.offset = Point(0, headH + 2);
+        return Size(w, headH + 2 + t.h);
+    }
+}
+
+/// Row of the chat feed: a bubble around the message `m` returns. Other senders' runs start with the name, in
+/// the sender's color, and the time. The row is reused for other messages, so an effect restyles it.
 private Node messageRow(Message delegate() m)
 {
-    return pad(x: 10, y: 6)(column(gap: 2)(
-        label(() => m().author, "strong"),
-        label(() => m().text, wrap: true),
-    ));
+    import std.algorithm.searching : countUntil;
+
+    Label name = label(() => m().author, "name0");
+    Label text = label(() => m().text, wrap: true);
+    BubbleBody content = new BubbleBody(name, label(() => clockOf(m().id), "bubbleTime"), text);
+    Panel bubble = panel(variant: "bubble")(content);
+    BubbleLine line = new BubbleLine(bubble);
+    effect(() {
+        Message msg = m();
+        bool mine = msg.author == "You";
+        untracked(() {
+            line.mine = mine;
+            line.first = msg.first;
+            bubble.variant = mine ? "bubbleMine" : "bubble";
+            text.setVariant(mine ? "bubbleMine" : null);
+            name.setVariant(format("name%d", max(0, chatAuthors.countUntil(msg.author))));
+            content.showHead(msg.first && mine == false);
+            line.markNeedsLayout();
+        });
+    });
+    return line;
 }
+
 /// Containers: rows and columns, padding, panels, separators, flex and scrolling.
 Node layoutPage()
 {
@@ -1205,6 +1323,69 @@ Node dialogsPage(Gallery g)
         section("Behavior", label("Presses outside a dialog do nothing, and Tab stays inside it. Escape cancels, "
             ~ "Enter presses the main button unless it is disabled, and focus goes back where it was on close. "
             ~ "File dialogs answer later on the UI thread.", "muted", wrap: true)),
+    );
+}
+
+/// Tray icon page: a checkbox shows the icon, whose menu toggles the window, counts pings and picks a mode.
+Node trayPage(Gallery g)
+{
+    Signal!bool wanted = signal(false);
+    Signal!bool closeHides = signal(true);
+    Signal!int pings = signal(0);
+    Signal!string mode = signal("Normal");
+    Signal!string status = signal("No tray icon");
+    Tray shown;
+
+    /// Menu item picking mode `m`, checked while it is the mode.
+    MenuItem modeItem(string m)
+    {
+        return menuItem(m, () { mode.set(m); }, checked: () => mode.get == m);
+    }
+
+    effect(() {
+        bool on = wanted.get;
+        untracked(() {
+            if (on && shown is null)
+            {
+                shown = g.host.tray(icon: ringImage(32), tooltip: "dentrite gallery")(
+                    menuItem("&Show window", () { g.host.visible = g.host.visible == false; },
+                        checked: () => g.host.visible),
+                    menuItem("&Ping", () { pings.set(pings.peek + 1); }),
+                    menu("&Mode")(modeItem("Normal"), modeItem("Quiet"), modeItem("Busy")),
+                    menuSeparator(),
+                    menuItem("&Quit", () { g.host.running = false; }),
+                );
+                status.set(shown is null ? "This system has no tray, or SDL could not reach it"
+                    : "Tray icon shown");
+            }
+            else if (on == false && shown !is null)
+            {
+                shown.close();
+                shown = null;
+                status.set("No tray icon");
+            }
+        });
+    });
+    g.host.onCloseRequest = () {
+        if (shown is null || closeHides.peek == false)
+        {
+            return true;
+        }
+        g.host.visible = false;
+        return false;
+    };
+
+    return column(gap: 22)(
+        section("System tray", column(gap: 8, cross: CrossAlign.start)(
+            checkbox(wanted, "Show a tray icon"),
+            checkbox(closeHides, "Closing the window hides it while the icon shows"),
+            label(&status.get, "muted"),
+            label(() => format("Pings: %d, mode: %s", pings.get, mode.get)),
+        )),
+        section("Behavior", label("Most trays open the menu on any click, so Show window brings the window back. "
+            ~ "Entries follow their command's label, enabled and checked states every frame. On Linux the tray "
+            ~ "needs an AppIndicator library and a desktop that shows StatusNotifier items.", "muted",
+            wrap: true)),
     );
 }
 

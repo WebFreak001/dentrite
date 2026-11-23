@@ -101,6 +101,7 @@ on Windows).
 | `island.d` | Island node and raw view. |
 | `overlay.d` | Popups: anchoring, flip and clamp, light dismiss, modal. |
 | `command.d` | Commands and shortcuts. |
+| `tray.d` | System tray icon with a menu of menu items. |
 | `dock.d` | Docking: tabs, splitters, floating panes, layout save and restore. |
 | `access.d` | Accessibility tree, diffed per frame. |
 | `text.d` | Fonts with fallback, shaping cache, wrapping, glyph atlas. |
@@ -126,7 +127,7 @@ on Windows).
 | Module | What |
 |---|---|
 | `window.d` | `Window`, a host on the SDL3 platform. |
-| `sdl3.d`, `c/sdl.d` | SDL3 platform: window, events, clipboard, cursors, file dialogs. |
+| `sdl3.d`, `c/sdl.d` | SDL3 platform: window, events, clipboard, cursors, file dialogs, tray icons. |
 | `deadkeys.d`, `c/wayland.d` | Dead keys on Wayland without an input method. |
 | `accesskit.d`, `c/accesskit.d` | AccessKit adapter. |
 | `sdlimage.d`, `c/sdlimage.d` | Image files through SDL3_image. |

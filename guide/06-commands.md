@@ -110,3 +110,38 @@ with no paths when cancelled.
 `tooltip:` on a builder, or `node.setTooltip(text)` later. `commandTip(cmd)`
 makes the text from a command, with its shortcut. A tooltip shows after the
 pointer rests 500 ms, and Tab to a button shows its tooltip below it.
+
+## Tray icon
+
+`h.tray(icon:, tooltip:)(items...)` (`dentrite.tray`) shows an icon in the
+system tray with a menu of the same `menuItem`, `menu` and `menuSeparator`
+builders. Entries follow their command's label, enabled and checked states
+at each frame. It returns null when the system has no tray, such as on
+Linux without an AppIndicator library or a desktop showing StatusNotifier
+items.
+
+Most trays open the menu on any click and say nothing about a click on the
+icon itself, so the menu needs an entry that brings the window back:
+
+<!-- src="examples/source/guide/commands.d" from="Tray notesTray(" -->
+```d
+/// Tray icon of `h` with a menu that shows or hides the window and quits. While it shows, closing the window hides
+/// it. Null without a tray.
+Tray notesTray(Host h, Image icon)
+{
+    Command show = command("&Show window", () { h.visible = h.visible == false; }, checked: () => h.visible);
+    Tray t = h.tray(icon: icon, tooltip: "Notes")(menuItem(show), menuSeparator(),
+        menuItem("&Quit", () { h.running = false; }));
+    if (t !is null)
+    {
+        h.onCloseRequest = () {
+            h.visible = false;
+            return false;
+        };
+    }
+    return t;
+}
+```
+
+`h.visible = true` also unminimizes and raises the window. `t.icon(img)`
+and `t.tooltip(text)` change the icon later, `t.close()` removes it.

@@ -11,8 +11,13 @@ Known gaps, by area.
   cancelled.
 - A hidden window still draws the frames asked for, such as animations.
 - Window icons take one image, no extra sizes.
-- No system tray icon. A window hidden with `setVisible(false)` has no way back
-  for the user.
+- Tray icons: no click on the icon itself, only menu entries. No icons in
+  entries, and entries cannot be added or removed once shown, close and
+  open the tray again. Linux needs an AppIndicator library and a desktop
+  showing StatusNotifier items. Outside Windows the loop wakes every 50 ms
+  while a tray shows, as SDL runs it only while pumping events.
+- Tray submenus on SDL before 3.2.16 rely on a workaround that reads SDL's
+  private menu struct, see `holdSubmenu` in `sdl3.d`.
 
 ## Rendering
 

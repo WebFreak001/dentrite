@@ -10,7 +10,7 @@ import dentrite.node : CursorShape;
 import dentrite.platform;
 
 /// Fixed size framebuffer with events queued by the app.
-final class HeadlessPlatform : Platform, FileDialogs, AccessAdapter, WindowControl
+final class HeadlessPlatform : Platform, FileDialogs, AccessAdapter, WindowControl, Trays
 {
     Metrics size;        /// framebuffer size and scale
     Event[] queue;       /// events `wait` hands out, oldest first
@@ -27,6 +27,8 @@ final class HeadlessPlatform : Platform, FileDialogs, AccessAdapter, WindowContr
     bool hidden;         /// true while hidden
     int[2] minSize;      /// last minimum size, width then height
     Image icon;          /// last icon set
+    HeadlessTray[] trays; /// tray icons opened, closed ones included
+    bool trayless;       /// true to answer `openTray` with null, as without a system tray
 
     /// Platform `w` by `h` logical pixels at `scale`.
     this(int w, int h, float scale = 1)
@@ -124,6 +126,24 @@ final class HeadlessPlatform : Platform, FileDialogs, AccessAdapter, WindowContr
         icon = img;
     }
 
+    /// Records a tray icon, null when `trayless`.
+    TrayIcon openTray(Image icon, string tooltip, const(TrayEntry)[] menu, void delegate(size_t) pressed)
+    {
+        if (trayless)
+        {
+            return null;
+        }
+        HeadlessTray t = new HeadlessTray;
+        t.platform = this;
+        t.icon = icon;
+        t.tooltip = tooltip;
+        t.menu = (cast(TrayEntry[]) menu).dup;
+        t.pressed = pressed;
+        flatten(t.menu, t.entries);
+        trays ~= t;
+        return t;
+    }
+
     /// Counts the frame.
     void present()
     {
@@ -164,6 +184,63 @@ final class HeadlessPlatform : Platform, FileDialogs, AccessAdapter, WindowContr
     void close()
     {
         setWaker(null);
+    }
+}
+
+/// Tray icon recorded by `HeadlessPlatform`.
+final class HeadlessTray : TrayIcon
+{
+    Image icon;          /// last icon set
+    string tooltip;      /// last tooltip set
+    TrayEntry[] menu;    /// menu as opened
+    TrayEntry[] entries; /// entries depth first, with their updates, submenus flattened
+    bool closed;         /// true once closed
+
+    private HeadlessPlatform platform;        /// platform queueing presses
+    private void delegate(size_t) pressed; /// press handler
+
+    /// Queues a press on entry `index`, as a `call` event.
+    void press(size_t index)
+    {
+        void delegate(size_t) p = pressed;
+        Event e = { kind: EventKind.call, call: () { p(index); } };
+        platform.queue ~= e;
+    }
+
+    /// Records the icon.
+    void setIcon(Image img)
+    {
+        icon = img;
+    }
+
+    /// Records the tooltip.
+    void setTooltip(string tip)
+    {
+        tooltip = tip;
+    }
+
+    /// Records the states of entry `index`.
+    void setEntry(size_t index, ref const TrayEntry e)
+    {
+        entries[index].label = e.label;
+        entries[index].enabled = e.enabled;
+        entries[index].checked = e.checked;
+    }
+
+    /// Marks it closed.
+    void close()
+    {
+        closed = true;
+    }
+}
+
+/// Appends `menu` to `flat` depth first.
+private void flatten(TrayEntry[] menu, ref TrayEntry[] flat)
+{
+    foreach (ref TrayEntry e; menu)
+    {
+        flat ~= e;
+        flatten(e.sub, flat);
     }
 }
 

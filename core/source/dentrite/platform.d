@@ -125,10 +125,40 @@ interface FileDialogs
 interface WindowControl
 {
     void setTitle(string title);       /// sets the title bar text
-    void setVisible(bool on);          /// shows or hides the window
+    void setVisible(bool on);          /// shows, unminimizes and raises the window, or hides it
     bool visible();                    /// true unless hidden
     void setMinimumSize(int w, int h); /// smallest size the user can resize to, 0 for no limit
     void setIcon(Image icon);          /// sets the icon the window system shows
+}
+
+/// Entry of a tray icon's menu.
+struct TrayEntry
+{
+    string label;        /// plain text, no mnemonic marker, null for a separator
+    bool enabled = true; /// accepts presses
+    bool checkable;      /// has a check mark, fixed once shown
+    bool checked;        /// check mark on
+    bool submenu;        /// opens `sub`, fixed once shown
+    TrayEntry[] sub;     /// submenu entries
+}
+
+/// Tray icon shown by a platform, from `Trays.openTray`. Entries are numbered depth first: an entry, its
+/// submenu's entries, then the next entry.
+interface TrayIcon
+{
+    void setIcon(Image icon);    /// replaces the icon
+    void setTooltip(string tip); /// replaces the tooltip
+    /// Updates the label, enabled and checked states of entry `index`. Not for separators.
+    void setEntry(size_t index, ref const TrayEntry e);
+    void close();                /// removes the icon, safe to call twice
+}
+
+/// Platform with system tray icons.
+interface Trays
+{
+    /// Shows a tray icon with `menu`, or null when the system has no tray. A press on entry `i` comes back from
+    /// `wait` as a `call` event running `pressed(i)`. `icon` may be null.
+    TrayIcon openTray(Image icon, string tooltip, const(TrayEntry)[] menu, void delegate(size_t) pressed);
 }
 
 /// Window system side of a host: window, events, clipboard, cursor, presenting.

@@ -169,6 +169,12 @@ final class MenuItem : Node
         return enabled;
     }
 
+    /// Shown text, without the mnemonic marker.
+    string text() const
+    {
+        return label.text;
+    }
+
     /// Sets the enabled and checked states, repainting on change.
     void setState(bool enabled, bool checked)
     {

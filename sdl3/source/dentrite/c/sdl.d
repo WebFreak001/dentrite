@@ -43,6 +43,7 @@ enum uint SDL_INIT_VIDEO = 0x20; /// video and events
 enum ulong SDL_WINDOW_OPENGL = 0x2;                /// usable with a GL context
 enum ulong SDL_WINDOW_HIDDEN = 0x8;                /// not shown until `SDL_ShowWindow`
 enum ulong SDL_WINDOW_RESIZABLE = 0x20;            /// user resizable
+enum ulong SDL_WINDOW_MINIMIZED = 0x40;            /// minimized
 enum ulong SDL_WINDOW_HIGH_PIXEL_DENSITY = 0x2000; /// full resolution back buffer on HiDPI
 
 /// GL context attributes, in header order.
@@ -239,6 +240,7 @@ enum SDL_SystemCursor : int
 }
 
 bool SDL_Init(uint flags);                              /// starts subsystems
+int SDL_GetVersion();                                   /// loaded version, major * 1000000 + minor * 1000 + patch
 void SDL_Quit();                                        /// stops everything
 const(char)* SDL_GetError();                            /// last error text
 const(char)* SDL_GetCurrentVideoDriver();               /// video driver name, such as "x11" or "wayland"
@@ -262,6 +264,8 @@ void SDL_DestroyWindow(SDL_Window* window);             /// closes a window
 bool SDL_ShowWindow(SDL_Window* window);                /// maps a hidden window
 bool SDL_HideWindow(SDL_Window* window);                /// unmaps a window
 ulong SDL_GetWindowFlags(SDL_Window* window);           /// SDL_WINDOW_* bits
+bool SDL_RestoreWindow(SDL_Window* window);             /// unminimizes
+bool SDL_RaiseWindow(SDL_Window* window);               /// brings to front and asks for focus
 bool SDL_SetWindowTitle(SDL_Window* window, const(char)* title); /// sets the title bar text
 bool SDL_SetWindowMinimumSize(SDL_Window* window, int w, int h); /// smallest size, 0 for no limit
 bool SDL_SetWindowIcon(SDL_Window* window, SDL_Surface* icon);  /// window icon, copied
@@ -327,3 +331,30 @@ void SDL_ShowSaveFileDialog(SDL_DialogFileCallback callback, void* userdata, SDL
 /// Shows a folder dialog. `defaultLocation` must stay valid until the callback.
 void SDL_ShowOpenFolderDialog(SDL_DialogFileCallback callback, void* userdata, SDL_Window* window,
     const(char)* defaultLocation, bool allowMany);
+
+struct SDL_Tray;      /// tray icon
+struct SDL_TrayMenu;  /// menu of a tray icon or submenu
+struct SDL_TrayEntry; /// entry of a tray menu
+
+enum uint SDL_TRAYENTRY_BUTTON = 0x1;          /// plain entry
+enum uint SDL_TRAYENTRY_CHECKBOX = 0x2;        /// entry with a check mark
+enum uint SDL_TRAYENTRY_SUBMENU = 0x4;         /// entry opening a submenu
+enum uint SDL_TRAYENTRY_DISABLED = 0x80000000; /// greyed out
+enum uint SDL_TRAYENTRY_CHECKED = 0x40000000;  /// checked, checkboxes only
+
+/// Tray entry press, on the main thread while SDL pumps events.
+alias SDL_TrayCallback = void function(void* userdata, SDL_TrayEntry* entry);
+
+SDL_Tray* SDL_CreateTray(SDL_Surface* icon, const(char)* tooltip); /// tray icon, copies `icon`, null on failure
+void SDL_SetTrayIcon(SDL_Tray* tray, SDL_Surface* icon);           /// replaces the icon
+void SDL_SetTrayTooltip(SDL_Tray* tray, const(char)* tooltip);     /// replaces the tooltip
+SDL_TrayMenu* SDL_CreateTrayMenu(SDL_Tray* tray);                  /// menu of a tray icon
+SDL_TrayMenu* SDL_CreateTraySubmenu(SDL_TrayEntry* entry);         /// submenu of a SUBMENU entry
+/// Inserts an entry at `pos`, -1 to append, null `label` for a separator.
+SDL_TrayEntry* SDL_InsertTrayEntryAt(SDL_TrayMenu* menu, int pos, const(char)* label, uint flags);
+void SDL_SetTrayEntryLabel(SDL_TrayEntry* entry, const(char)* label); /// relabels, not on separators
+void SDL_SetTrayEntryChecked(SDL_TrayEntry* entry, bool checked);  /// checks a checkbox entry
+void SDL_SetTrayEntryEnabled(SDL_TrayEntry* entry, bool enabled);  /// enables or greys out
+/// Sets what a press calls.
+void SDL_SetTrayEntryCallback(SDL_TrayEntry* entry, SDL_TrayCallback callback, void* userdata);
+void SDL_DestroyTray(SDL_Tray* tray);                              /// removes the icon and its menus

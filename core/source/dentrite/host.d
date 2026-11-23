@@ -1110,11 +1110,12 @@ class Host : Services
         return c is null || c.visible();
     }
 
-    /// Shows or hides the window. Hiding ends presses, input method text and hover, as losing focus and the pointer does.
+    /// Shows the window, unminimized and raised, or hides it. Hiding ends presses, input method text and hover, as
+    /// losing focus and the pointer does.
     void visible(bool on)
     {
         WindowControl c = cast(WindowControl) platform;
-        if (c is null || on == c.visible())
+        if (c is null || (on == false && c.visible() == false))
         {
             return;
         }

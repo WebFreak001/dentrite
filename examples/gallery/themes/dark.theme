@@ -74,6 +74,34 @@ color = red.400
 [text.warn]
 color = amber.400
 
+# Chat page: names in sender colors, times, the user's own bubbles.
+[text.name0]
+font = uiStrong
+size = 12.5
+color = blue.400
+
+[text.name1]
+font = uiStrong
+size = 12.5
+color = green.400
+
+[text.name2]
+font = uiStrong
+size = 12.5
+color = amber.400
+
+[text.name3]
+font = uiStrong
+size = 12.5
+color = red.400
+
+[text.bubbleTime]
+size = 11.5
+color = gray.400
+
+[text.bubbleMine]
+color = white
+
 [island]
 focus = blue.500
 
@@ -243,6 +271,18 @@ padY = 6
 
 [panel.pane]
 fill = gray.850
+
+[panel.bubble]
+fill = gray.750
+radius = 14
+padX = 12
+padY = 7
+
+[panel.bubbleMine]
+fill = blue.600
+radius = 14
+padX = 12
+padY = 7
 
 [panel.popup]
 fill = gray.800

@@ -5,7 +5,7 @@ import core.stdc.stdlib : free, malloc;
 import core.stdc.string : strdup;
 import core.sync.mutex : Mutex;
 import core.thread : Thread;
-import core.time : Duration;
+import core.time : Duration, MonoTime, msecs;
 import dentrite.access : AccessAdapter, AccessDemand, AccessUpdate;
 import dentrite.accesskit : AccessKitAdapter;
 import dentrite.backend.gl33 : GL33Renderer;
@@ -17,7 +17,7 @@ import dentrite.geom;
 import dentrite.image : Image;
 import dentrite.node : CursorShape, Mod, PointerKind;
 import dentrite.platform;
-import std.algorithm.comparison : max;
+import std.algorithm.comparison : max, min;
 import std.exception : enforce;
 import std.process : environment;
 import std.stdio : stderr;
@@ -36,6 +36,179 @@ private void wakeSdl() nothrow
 
 /// SDL3 user event type carrying an AccessKit action request, set once SDL is up.
 private __gshared uint accessEvent;
+
+/// SDL3 user event type carrying a tray entry press, its key in `code`, set once SDL is up.
+private __gshared uint trayEvent;
+
+/// Key of the next tray entry, so a press queued before its tray closed matches no tray.
+private __gshared uint nextTrayKey = 1;
+
+/// Longest wait in milliseconds while a tray is open. Outside Windows SDL runs trays only while it pumps events,
+/// which a blocking wait does not do.
+version (Windows)
+    private enum int trayWaitMs = int.max;
+else
+    private enum int trayWaitMs = 50;
+
+/// Pushes a press on the tray entry with key `userdata` as `trayEvent`. Main thread, while SDL pumps events.
+private extern (C) void trayPressed(void* userdata, SDL_TrayEntry* entry) nothrow @nogc
+{
+    SDL_Event e;
+    e.type = trayEvent;
+    e.user.code = cast(int) cast(size_t) userdata;
+    SDL_PushEvent(&e);
+}
+
+/// Runs `fn` with an SDL surface wrapping `img`, null for a null or empty image or when SDL fails.
+private void withSurface(Image img, scope void delegate(SDL_Surface*) fn)
+{
+    if (img is null || img.empty)
+    {
+        fn(null);
+        return;
+    }
+    ubyte[] px = img.straight();
+    SDL_Surface* s = SDL_CreateSurfaceFrom(img.width, img.height, SDL_PIXELFORMAT_ABGR8888, px.ptr, img.width * 4);
+    fn(s);
+    if (s !is null)
+    {
+        SDL_DestroySurface(s);
+    }
+}
+
+/// Tray entry text for SDL, which Windows reads with `&` marking a mnemonic.
+private const(char)* trayLabel(string label)
+{
+    version (Windows)
+    {
+        import std.array : replace;
+
+        label = label.replace("&", "&&");
+    }
+    return label.toStringz;
+}
+
+/// Takes the GTK reference on submenu `m` that SDL before 3.2.16 forgets, so destroying the tray does not free the
+/// menu twice and crash. Does nothing outside Linux or on a null menu.
+/// HACK: reads the GtkMenu from the first field of SDL's private `SDL_TrayMenu`, as laid out up to 3.2.14.
+private void holdSubmenu(SDL_TrayMenu* m)
+{
+    version (linux)
+    {
+        import core.sys.posix.dlfcn : RTLD_LAZY, RTLD_NOLOAD, dlclose, dlopen, dlsym;
+
+        if (m is null || SDL_GetVersion() >= 3_002_016)
+        {
+            return;
+        }
+        void* lib = dlopen("libgobject-2.0.so.0", RTLD_LAZY | RTLD_NOLOAD);
+        alias Sink = extern (C) void* function(void*) nothrow @nogc;
+        Sink sink = lib is null ? null : cast(Sink) dlsym(lib, "g_object_ref_sink");
+        if (sink !is null)
+        {
+            sink(*cast(void**) m);
+        }
+        if (lib !is null)
+        {
+            dlclose(lib);
+        }
+    }
+}
+
+/// SDL tray icon. Entries carry keys `firstKey` and up, depth first.
+private final class SdlTray : TrayIcon
+{
+    SdlPlatform platform;            /// platform listing it while open
+    SDL_Tray* tray;                  /// SDL tray, null once closed
+    SDL_TrayEntry*[] entries;        /// entries depth first, null where SDL made none
+    uint firstKey;                   /// key of the first entry
+    void delegate(size_t) pressed;   /// app handler, given the entry index
+
+    /// Adds `list` to `menu` and its submenus, null `menu` to only count the entries.
+    void add(SDL_TrayMenu* menu, const(TrayEntry)[] list)
+    {
+        foreach (ref const TrayEntry e; list)
+        {
+            uint flags = e.submenu ? SDL_TRAYENTRY_SUBMENU : e.checkable ? SDL_TRAYENTRY_CHECKBOX
+                : SDL_TRAYENTRY_BUTTON;
+            if (e.label !is null && e.enabled == false)
+            {
+                flags |= SDL_TRAYENTRY_DISABLED;
+            }
+            if (e.checkable && e.checked)
+            {
+                flags |= SDL_TRAYENTRY_CHECKED;
+            }
+            uint key = cast(uint)(firstKey + entries.length);
+            SDL_TrayEntry* t = menu is null ? null
+                : SDL_InsertTrayEntryAt(menu, -1, e.label is null ? null : trayLabel(e.label), flags);
+            entries ~= t;
+            if (t !is null && e.label !is null && e.submenu == false)
+            {
+                SDL_SetTrayEntryCallback(t, &trayPressed, cast(void*) cast(size_t) key);
+            }
+            if (e.submenu)
+            {
+                SDL_TrayMenu* sub = t is null ? null : SDL_CreateTraySubmenu(t);
+                holdSubmenu(sub);
+                add(sub, e.sub);
+            }
+        }
+    }
+
+    /// Index of the entry with `key`, or -1.
+    ptrdiff_t indexOf(uint key)
+    {
+        return key >= firstKey && key - firstKey < entries.length ? key - firstKey : -1;
+    }
+
+    /// Replaces the icon.
+    void setIcon(Image img)
+    {
+        if (tray !is null)
+        {
+            withSurface(img, (SDL_Surface* s) { SDL_SetTrayIcon(tray, s); });
+        }
+    }
+
+    /// Replaces the tooltip.
+    void setTooltip(string tip)
+    {
+        if (tray !is null)
+        {
+            SDL_SetTrayTooltip(tray, tip.toStringz);
+        }
+    }
+
+    /// Updates the label and states of entry `index`.
+    void setEntry(size_t index, ref const TrayEntry e)
+    {
+        SDL_TrayEntry* t = tray is null || e.label is null ? null : entries[index];
+        if (t is null)
+        {
+            return;
+        }
+        SDL_SetTrayEntryLabel(t, trayLabel(e.label));
+        SDL_SetTrayEntryEnabled(t, e.enabled);
+        if (e.checkable)
+        {
+            SDL_SetTrayEntryChecked(t, e.checked);
+        }
+    }
+
+    /// Removes the icon and its menus.
+    void close()
+    {
+        if (tray is null)
+        {
+            return;
+        }
+        SDL_DestroyTray(tray);
+        tray = null;
+        entries = null;
+        platform.dropTray(this);
+    }
+}
 
 /// File dialog waiting for its answer. The SDL callback fills it on any thread, `wait` hands it to the UI.
 private final class FileRequest
@@ -76,7 +249,7 @@ private extern (C) void fileAnswered(void* userdata, const(char*)* list, int fil
 }
 
 /// SDL3 window with a GL 3.3 context or a software surface.
-final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl
+final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl, Trays
 {
     Renderer renderer;              /// renderer drawing into this window, created along with it
     /// Called with every SDL event on the UI thread, before the library handles it.
@@ -98,6 +271,7 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl
     private Event queued;           /// event `wait` hands out next, after one translated into two
     private bool hasQueued;         /// `queued` is waiting
     private float forced = 0;       /// `WindowOptions.scale`, 0 for the display's own
+    private SdlTray[] trays;        /// tray icons open
 
     /// Opens the window and sets up the renderer `o.renderer` names.
     this(WindowOptions o)
@@ -108,8 +282,9 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl
         // NOTE: else closing the window also sends a quit, which `Host.onCloseRequest` cannot cancel.
         SDL_SetHint("SDL_QUIT_ON_LAST_WINDOW_CLOSE", "0");
         enforce(SDL_Init(SDL_INIT_VIDEO), "SDL_Init: " ~ error());
-        wakeEvent = SDL_RegisterEvents(2);
+        wakeEvent = SDL_RegisterEvents(3);
         accessEvent = wakeEvent + 1;
+        trayEvent = wakeEvent + 2;
         logInput = environment.get("DENTRITE_LOG_INPUT").length > 0;
         if (logInput)
         {
@@ -279,7 +454,7 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl
             return true;
         }
         SDL_Event s;
-        if ((ms == 0 ? SDL_PollEvent(&s) : SDL_WaitEventTimeout(&s, ms)) == false)
+        if (waitSdl(s, ms) == false)
         {
             return false;
         }
@@ -293,6 +468,67 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl
             takeAnswer(e);
         }
         return true;
+    }
+
+    /// Next SDL event within `ms` milliseconds, -1 for no limit. While a tray is open, waits in slices of
+    /// `trayWaitMs` so SDL pumps it.
+    private bool waitSdl(ref SDL_Event s, int ms)
+    {
+        if (ms == 0)
+        {
+            return SDL_PollEvent(&s);
+        }
+        if (trays.length == 0 || (ms > 0 && ms <= trayWaitMs))
+        {
+            return SDL_WaitEventTimeout(&s, ms);
+        }
+        MonoTime end = MonoTime.currTime + msecs(ms);
+        while (true)
+        {
+            long left = ms < 0 ? trayWaitMs : (end - MonoTime.currTime).total!"msecs";
+            if (left <= 0)
+            {
+                return SDL_PollEvent(&s);
+            }
+            if (SDL_WaitEventTimeout(&s, cast(int) min(left, trayWaitMs)))
+            {
+                return true;
+            }
+        }
+    }
+
+    /// Shows a tray icon, or null when SDL has none here, such as on Linux without an AppIndicator library.
+    TrayIcon openTray(Image icon, string tooltip, const(TrayEntry)[] menu, void delegate(size_t) pressed)
+    {
+        SDL_Tray* t;
+        withSurface(icon, (SDL_Surface* s) { t = SDL_CreateTray(s, tooltip.toStringz); });
+        if (t is null)
+        {
+            stderr.writefln("dentrite: no tray icon, %s", error());
+            return null;
+        }
+        SdlTray tray = new SdlTray;
+        tray.platform = this;
+        tray.tray = t;
+        tray.pressed = pressed;
+        tray.firstKey = nextTrayKey;
+        tray.add(SDL_CreateTrayMenu(t), menu);
+        nextTrayKey += cast(uint) tray.entries.length;
+        trays ~= tray;
+        return tray;
+    }
+
+    /// Forgets closed tray `t`.
+    private void dropTray(SdlTray t)
+    {
+        foreach (size_t i, SdlTray k; trays)
+        {
+            if (k is t)
+            {
+                trays = trays[0 .. i] ~ trays[i + 1 .. $];
+                return;
+            }
+        }
     }
 
     /// Shows an SDL file dialog over the window. The answer comes back from `wait` as a `call` event.
@@ -465,9 +701,29 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl
                 e.kind = EventKind.access;
                 e.request = AccessKitAdapter.request(s);
             }
+            else if (s.type == trayEvent)
+            {
+                trayPress(cast(uint) s.user.code, e);
+            }
             break;
         }
         return e;
+    }
+
+    /// Turns a press on the tray entry with `key` into a `call` event, none if its tray closed.
+    private void trayPress(uint key, ref Event e)
+    {
+        foreach (SdlTray t; trays)
+        {
+            ptrdiff_t i = t.indexOf(key);
+            if (i >= 0)
+            {
+                void delegate(size_t) pressed = t.pressed;
+                e.kind = EventKind.call;
+                e.call = () { pressed(i); };
+                return;
+            }
+        }
     }
 
     /// Writes key, text and composition events to stderr.
@@ -581,17 +837,20 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl
         SDL_SetWindowTitle(win, title.toStringz);
     }
 
-    /// Shows or hides the window.
+    /// Shows, unminimizes and raises the window, or hides it.
     void setVisible(bool on)
     {
-        if (on)
-        {
-            SDL_ShowWindow(win);
-        }
-        else
+        if (on == false)
         {
             SDL_HideWindow(win);
+            return;
         }
+        SDL_ShowWindow(win);
+        if (SDL_GetWindowFlags(win) & SDL_WINDOW_MINIMIZED)
+        {
+            SDL_RestoreWindow(win);
+        }
+        SDL_RaiseWindow(win);
     }
 
     /// True unless hidden.
@@ -609,15 +868,12 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl
     /// Sets the window icon from `img`, which SDL copies.
     void setIcon(Image img)
     {
-        ubyte[] px = img.straight();
-        SDL_Surface* s = SDL_CreateSurfaceFrom(img.width, img.height, SDL_PIXELFORMAT_ABGR8888, px.ptr,
-            img.width * 4);
-        if (s is null)
-        {
-            return;
-        }
-        SDL_SetWindowIcon(win, s);
-        SDL_DestroySurface(s);
+        withSurface(img, (SDL_Surface* s) {
+            if (s !is null)
+            {
+                SDL_SetWindowIcon(win, s);
+            }
+        });
     }
 
     /// Starts or stops SDL text events.
@@ -676,6 +932,10 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl
         {
             access.close();
             access = null;
+        }
+        foreach (SdlTray t; trays.dup)
+        {
+            t.close();
         }
         if (deadKeys !is null)
         {
