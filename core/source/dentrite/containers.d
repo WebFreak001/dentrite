@@ -1,4 +1,4 @@
-/// Layout containers: rows, columns, padding, panels, fixed sizes and a vertical scroll view.
+/// Layout containers: rows, columns, grids, stacks, padding, panels, fixed sizes and a vertical scroll view.
 ///
 /// Builders take options by name in one call and children in a second call:
 /// `row(gap: 4)(a, b)`. One call would bind a positional child after a named
@@ -8,7 +8,7 @@ module dentrite.containers;
 import dentrite.draw;
 import dentrite.node;
 import std.algorithm.comparison : clamp, max, min;
-import std.math : isInfinity, round;
+import std.math : floor, isInfinity, round;
 
 /// Main axis of a flex container.
 enum Axis
@@ -17,13 +17,19 @@ enum Axis
     vertical,   /// children top to bottom, as in a column
 }
 
-/// Placement of children across the main axis.
+/// Placement of a child on one axis of the space it is given.
 enum CrossAlign
 {
     start,   /// left or top
     center,  /// centered
     end,     /// right or bottom
-    stretch, /// stretched across the full cross extent
+    stretch, /// stretched to fill it
+}
+
+/// Offset of a child placed by `a` in `slack` spare pixels.
+private float alignIn(CrossAlign a, float slack)
+{
+    return a == CrossAlign.center ? round(slack / 2) : a == CrossAlign.end ? slack : 0;
 }
 
 /// Single child inset by `insets`.
@@ -184,8 +190,7 @@ class Flex : Node
         float pos = 0;
         foreach (Node k; children)
         {
-            float slack = crossSize - crossOf(k.size);
-            float across = cross == CrossAlign.center ? round(slack / 2) : cross == CrossAlign.end ? slack : 0;
+            float across = alignIn(cross, crossSize - crossOf(k.size));
             k.offset = axis == Axis.horizontal ? Point(pos, across) : Point(across, pos);
             pos += mainOf(k.size) + gap;
         }
@@ -310,6 +315,291 @@ struct SizedSpec
 SizedSpec sized(float w = float.nan, float h = float.nan)
 {
     return SizedSpec(w, h);
+}
+
+/// Cells of equal width in rows, filled left to right.
+///
+/// Each row is as tall as its tallest cell, and rows share the extra height of
+/// a larger minimum, so an `expanded` grid fills its space.
+final class Grid : Node
+{
+    int cols;          /// column count, 0 to fit as many columns of `minCell` as the width allows
+    float minCell = 0; /// narrowest column when `cols` is 0
+    float gap = 0;     /// space between cells, across and down
+    CrossAlign cross;  /// vertical placement of each child in its row
+
+    /// Creates a grid of `kids`.
+    this(int cols, float minCell, float gap, CrossAlign cross, Node[] kids)
+    {
+        this.cols = cols;
+        this.minCell = minCell;
+        this.gap = gap;
+        this.cross = cross;
+        foreach (Node k; kids)
+        {
+            add(k);
+        }
+    }
+
+    /// Column count for a grid at most `maxW` wide.
+    private int columns(float maxW) const
+    {
+        if (cols > 0 || minCell <= 0)
+        {
+            return max(1, cols);
+        }
+        if (isInfinity(maxW))
+        {
+            return max(1, cast(int) children.length);
+        }
+        return max(1, cast(int) floor((maxW + gap) / (minCell + gap)));
+    }
+
+    /// Natural height of row `r` with `nc` columns, from the children's last layout.
+    private float rowHeight(size_t r, int nc) const
+    {
+        float h = 0;
+        foreach (const Node k; children[r * nc .. min((r + 1) * nc, children.length)])
+        {
+            h = max(h, k.size.h);
+        }
+        return h;
+    }
+
+    /// Measures the cells at their column width, then sizes the rows and places the cells.
+    /// An unbounded width makes every column as wide as the widest child.
+    protected override Size performLayout(Constraints c)
+    {
+        int nc = columns(c.maxW);
+        size_t nr = (children.length + nc - 1) / nc;
+        float gapsW = gap * (nc - 1);
+        float cellsW;
+        if (isInfinity(c.maxW))
+        {
+            float widest = minCell;
+            foreach (Node k; children)
+            {
+                widest = max(widest, k.layout(Constraints.init).w);
+            }
+            cellsW = max(widest * nc, c.minW - gapsW);
+        }
+        else
+        {
+            cellsW = max(0f, c.maxW - gapsW);
+        }
+
+        float natural = nr > 1 ? gap * (nr - 1) : 0;
+        foreach (size_t i, Node k; children)
+        {
+            int col = cast(int) (i % nc);
+            float w = round(cellsW * (col + 1) / nc) - round(cellsW * col / nc);
+            k.layout(Constraints(w, w, 0, float.infinity));
+        }
+        foreach (size_t r; 0 .. nr)
+        {
+            natural += rowHeight(r, nc);
+        }
+
+        float extra = nr > 0 ? max(0f, c.minH - natural) : 0;
+        float y = 0;
+        foreach (size_t r; 0 .. nr)
+        {
+            float rh = rowHeight(r, nc) + round(extra * (r + 1) / nr) - round(extra * r / nr);
+            foreach (size_t i; r * nc .. min((r + 1) * nc, children.length))
+            {
+                Node k = children[i];
+                int col = cast(int) (i % nc);
+                if (cross == CrossAlign.stretch && k.size.h != rh)
+                {
+                    k.layout(Constraints(k.size.w, k.size.w, rh, rh));
+                }
+                k.offset = Point(round(cellsW * col / nc) + gap * col, y + alignIn(cross, rh - k.size.h));
+            }
+            y += rh + gap;
+        }
+        return Size(cellsW + gapsW, natural + extra);
+    }
+}
+
+/// Grid options, waiting for the children.
+struct GridSpec
+{
+    int cols;         /// column count, 0 to fit columns of `minCell`
+    float minCell;    /// narrowest column when `cols` is 0
+    float gap;        /// space between cells
+    CrossAlign cross; /// vertical placement of each child in its row
+
+    /// Stores the options. Needed because `opCall` hides the struct literal.
+    this(int cols, float minCell, float gap, CrossAlign cross)
+    {
+        this.cols = cols;
+        this.minCell = minCell;
+        this.gap = gap;
+        this.cross = cross;
+    }
+
+    /// The grid holding `kids`.
+    Grid opCall(Node[] kids...)
+    {
+        return new Grid(cols, minCell, gap, cross, kids.dup);
+    }
+}
+
+/// Grid of `cols` columns, or of as many `minCell` wide ones as fit: `grid(minCell: 120, gap: 8)(a, b, c)`.
+GridSpec grid(int cols = 0, float minCell = 0, float gap = 0, CrossAlign cross = CrossAlign.stretch)
+{
+    assert(cols > 0 || minCell > 0, "grid needs cols or minCell");
+    return GridSpec(cols, minCell, gap, cross);
+}
+
+/// Children on top of each other, the last on top.
+///
+/// The stack is as large as its children, not counting those stretched on an
+/// axis, which fill it instead. With every child stretched it fills its space.
+final class Stack : Node
+{
+    CrossAlign x; /// horizontal placement of children without their own
+    CrossAlign y; /// vertical placement of children without their own
+
+    /// Creates a stack of `kids`, the last on top.
+    this(CrossAlign x, CrossAlign y, Node[] kids)
+    {
+        this.x = x;
+        this.y = y;
+        foreach (Node k; kids)
+        {
+            add(k);
+        }
+    }
+
+    /// Placement of `k`, from its `Aligned` wrapper or the stack.
+    private void placement(Node k, out CrossAlign ax, out CrossAlign ay) const
+    {
+        Aligned a = cast(Aligned) k;
+        ax = a is null ? x : a.x;
+        ay = a is null ? y : a.y;
+    }
+
+    /// Width from children not stretched across, then their heights, then stretched children fill.
+    protected override Size performLayout(Constraints c)
+    {
+        CrossAlign ax, ay;
+        float w = 0;
+        bool sizesW;
+        foreach (Node k; children)
+        {
+            placement(k, ax, ay);
+            if (ax != CrossAlign.stretch)
+            {
+                w = max(w, k.layout(c.loosen()).w);
+                sizesW = true;
+            }
+        }
+        float width = sizesW ? clamp(w, c.minW, c.maxW) : isInfinity(c.maxW) ? c.minW : c.maxW;
+
+        float h = 0;
+        bool sizesH;
+        foreach (Node k; children)
+        {
+            placement(k, ax, ay);
+            if (ax == CrossAlign.stretch)
+            {
+                k.layout(Constraints(width, width, 0, c.maxH));
+            }
+            if (ay != CrossAlign.stretch)
+            {
+                h = max(h, k.size.h);
+                sizesH = true;
+            }
+        }
+        float height = sizesH ? clamp(h, c.minH, c.maxH) : isInfinity(c.maxH) ? c.minH : c.maxH;
+
+        foreach (Node k; children)
+        {
+            placement(k, ax, ay);
+            if (ay == CrossAlign.stretch)
+            {
+                k.layout(ax == CrossAlign.stretch ? Constraints.tight(Size(width, height))
+                    : Constraints(0, c.maxW, height, height));
+            }
+            k.offset = Point(alignIn(ax, width - k.size.w), alignIn(ay, height - k.size.h));
+        }
+        return Size(width, height);
+    }
+}
+
+/// Stack options, waiting for the children.
+struct StackSpec
+{
+    CrossAlign x; /// horizontal placement of children
+    CrossAlign y; /// vertical placement of children
+
+    /// Stores the options. Needed because `opCall` hides the struct literal.
+    this(CrossAlign x, CrossAlign y)
+    {
+        this.x = x;
+        this.y = y;
+    }
+
+    /// The stack holding `kids`, the last on top.
+    Stack opCall(Node[] kids...)
+    {
+        return new Stack(x, y, kids.dup);
+    }
+}
+
+/// Children on top of each other: `stack(x: CrossAlign.center, y: CrossAlign.center)(disc, face)`.
+StackSpec stack(CrossAlign x = CrossAlign.start, CrossAlign y = CrossAlign.start)
+{
+    return StackSpec(x, y);
+}
+
+/// Stack child placed on its own. Outside a stack it does nothing.
+final class Aligned : Node
+{
+    CrossAlign x; /// horizontal placement in the stack
+    CrossAlign y; /// vertical placement in the stack
+
+    /// Wraps `child` with its placement.
+    this(CrossAlign x, CrossAlign y, Node child)
+    {
+        this.x = x;
+        this.y = y;
+        add(child);
+    }
+
+    /// Passes constraints through to the child.
+    protected override Size performLayout(Constraints c)
+    {
+        children[0].offset = Point.init;
+        return children[0].layout(c);
+    }
+}
+
+/// Placement options, waiting for the child.
+struct AlignedSpec
+{
+    CrossAlign x; /// horizontal placement in the stack
+    CrossAlign y; /// vertical placement in the stack
+
+    /// Stores the options. Needed because `opCall` hides the struct literal.
+    this(CrossAlign x, CrossAlign y)
+    {
+        this.x = x;
+        this.y = y;
+    }
+
+    /// The wrapper around `child`.
+    Aligned opCall(Node child)
+    {
+        return new Aligned(x, y, child);
+    }
+}
+
+/// Stack child with its own placement, an axis left out is `start`: `aligned(x: CrossAlign.end)(badge)`.
+AlignedSpec aligned(CrossAlign x = CrossAlign.start, CrossAlign y = CrossAlign.start)
+{
+    return AlignedSpec(x, y);
 }
 
 /// Look of a panel.
@@ -797,6 +1087,97 @@ unittest
     t.flush();
     assert(k[0].size.w + k[1].size.w + k[2].size.w == 100);
     assert(k[1].size.w == 34 && k[0].size.w == 33);
+}
+
+// Grid columns split the width in whole pixels, rows take their tallest cell and stretch the others.
+unittest
+{
+    Fixed[5] k;
+    foreach (size_t i, ref Fixed f; k)
+    {
+        f = new Fixed(Size(0, [10, 20, 15, 5, 5][i]));
+    }
+    Grid g = grid(cols: 3, gap: 4)(k[0], k[1], k[2], k[3], k[4]);
+    Tree t = bareTree(column(cross: CrossAlign.stretch)(g), Size(100, 300));
+    t.flush();
+    assert(g.size == Size(100, 29));
+    assert(k[0].bounds == Rect(0, 0, 31, 20));
+    assert(k[1].bounds == Rect(35, 0, 30, 20));
+    assert(k[2].bounds == Rect(69, 0, 31, 20));
+    assert(k[3].bounds == Rect(0, 24, 31, 5));
+}
+
+// A grid given a minimum height shares it between the rows, and `cross` places cells in them.
+unittest
+{
+    Fixed[3] k;
+    foreach (ref Fixed f; k)
+    {
+        f = new Fixed(Size(10, 10));
+    }
+    Grid g = grid(cols: 2, gap: 4, cross: CrossAlign.center)(k[0], k[1], k[2]);
+    Tree t = bareTree(g, Size(100, 60));
+    t.flush();
+    assert(g.size == Size(100, 60));
+    assert(k[0].bounds == Rect(0, 9, 48, 10), "row of 28, two of the 36 extra");
+    assert(k[2].bounds == Rect(0, 41, 48, 10), "row of 28 from 32");
+}
+
+// `minCell` fits as many columns as the width allows, an unbounded width puts every child in one row.
+unittest
+{
+    foreach (int w, int cols; [263: 3, 264: 4])
+    {
+        Node[] kids;
+        foreach (int i; 0 .. 5)
+        {
+            kids ~= new Fixed(Size(0, 10));
+        }
+        Grid g = grid(minCell: 60, gap: 8)(kids);
+        Tree t = bareTree(column()(g), Size(w, 300));
+        t.flush();
+        assert(kids[cols].offset == Point(0, 18), "first cell of the second row");
+    }
+    Fixed narrow = new Fixed(Size(30, 10));
+    Grid g = grid(minCell: 20, gap: 2)(narrow, new Fixed(Size(5, 10)));
+    Tree t = bareTree(row()(g), Size(500, 100));
+    t.flush();
+    assert(g.size == Size(62, 10), "two columns as wide as the widest child");
+}
+
+// A stack sizes to its children, centers them, and the last child wins hits.
+unittest
+{
+    Fixed disc = new Fixed(Size(40, 40));
+    Fixed face = new Fixed(Size(20, 10));
+    Stack s = stack(x: CrossAlign.center, y: CrossAlign.center)(disc, face);
+    Tree t = bareTree(row()(s), Size(200, 100));
+    t.flush();
+    assert(s.size == Size(40, 40));
+    assert(face.offset == Point(10, 15));
+    assert(s.hitTest(Point(20, 50), Point(0, 30)) is face);
+    assert(s.hitTest(Point(2, 32), Point(0, 30)) is disc);
+}
+
+// Stretched stack children fill the size the others give, `aligned` places one child on its own.
+unittest
+{
+    Fixed back = new Fixed(Size(500, 500));
+    Fixed content = new Fixed(Size(30, 20));
+    Fixed badge = new Fixed(Size(8, 8));
+    Stack s = stack()(aligned(x: CrossAlign.stretch, y: CrossAlign.stretch)(back), content,
+        aligned(x: CrossAlign.end, y: CrossAlign.end)(badge));
+    Tree t = bareTree(row()(s), Size(200, 100));
+    t.flush();
+    assert(s.size == Size(30, 20));
+    assert(back.size == Size(30, 20));
+    assert(badge.offset == Point(0, 0) && badge.parent.offset == Point(22, 12));
+
+    Fixed fill = new Fixed(Size.init);
+    Stack all = stack(x: CrossAlign.stretch, y: CrossAlign.stretch)(fill);
+    t = bareTree(all, Size(100, 50));
+    t.flush();
+    assert(fill.size == Size(100, 50), "every child stretched fills the space");
 }
 
 // A column inside a scroll view gets unbounded height, and flex children keep their natural size.

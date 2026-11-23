@@ -1,4 +1,4 @@
-/// Chapter 3: rows, columns, padding, sizes, panels and scrolling.
+/// Chapter 3: rows, columns, grids, stacks, padding, sizes, panels and scrolling.
 module guide.layout;
 
 import dentrite.containers;
@@ -34,6 +34,20 @@ Node shell()
         )),
         panel(variant: "status")(row()(label("Ready", "muted"), spacer(), label("60 lines", "muted"))),
     );
+}
+
+/// Tiles at least 120 px wide, as many per row as fit, each a name over a stretched background.
+Node tiles(string[] names)
+{
+    Node[] cells;
+    foreach (string n; names)
+    {
+        cells ~= sized(h: 80)(stack(y: CrossAlign.end)(
+            aligned(x: CrossAlign.stretch, y: CrossAlign.stretch)(panel(variant: "popup")(new Fixed(Size.init))),
+            pad(all: 8)(label(n)),
+        ));
+    }
+    return grid(minCell: 120, gap: 8)(cells);
 }
 
 /// The sidebar keeps its width, the content takes the rest, and the bars stay at the edges.
@@ -75,4 +89,24 @@ unittest
     h.frame();
     Node r = h.tree.content;
     assert(r.children[1].size.w == 100 && r.children[2].size.w == 200 && r.children[3].size.w == 100);
+}
+
+/// Three 128 px columns fit in 400 px, and each name sits at the bottom of its tile.
+unittest
+{
+    import dentrite.host : Host;
+    import guide.harness;
+
+    Host h = testHost(400, 300);
+    scope (exit)
+    {
+        h.close();
+    }
+    h.setRoot(column()(tiles(["Docs", "Music", "Photos", "Videos"])));
+    h.frame();
+    Node g = h.tree.content.children[0];
+    assert(g.children[1].bounds == Rect(136, 0, 128, 80));
+    assert(g.children[3].bounds == Rect(0, 88, 128, 80), "fourth tile starts the second row");
+    Node name = g.children[0].children[0].children[1];
+    assert(name.bounds.bottom == 80);
 }

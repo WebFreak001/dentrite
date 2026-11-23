@@ -95,7 +95,7 @@ on Windows).
 | `geom.d` | Point, Size, Rect, Insets, Color. |
 | `signals.d` | Signals and effects. |
 | `node.d` | Retained tree: layout, cached layers, input, focus, owner scopes. |
-| `containers.d` | Row, column, padding, panel, sized box, separator, scroll view. |
+| `containers.d` | Row, column, grid, stack, padding, panel, sized box, separator, scroll view. |
 | `widgets/` | Widgets, one module each. See the gallery. |
 | `immediate.d` | Island core: builds retained nodes, opens popups. |
 | `island.d` | Island node and raw view. |

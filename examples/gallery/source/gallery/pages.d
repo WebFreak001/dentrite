@@ -101,6 +101,8 @@ Page[] pages(Gallery g)
         Page("Trees", "Hierarchies that expand and collapse, listing only the rows in view.", () => treesPage()),
         Page("Tables", "Columns that sort and resize over a virtual list of rows.", () => tablesPage()),
         Page("Layout", "Rows, columns, padding, panels, separators, flex and scrolling.", () => layoutPage()),
+        Page("Grids and stacks", "Cells in rows of equal columns, and children on top of each other.",
+            () => gridsPage()),
         Page("Dock", "Tab stacks and splits. Drag tabs to dock or float them.", () => dockPage()),
         Page("Islands", "Immediate-mode code on the same layout and renderer.", () => islandsPage()),
     ];
@@ -223,15 +225,15 @@ Node textPage()
             label("Emoji: 😀 ⭐ 👍🏽 🇯🇵 ❤️ 1️⃣ 👩‍💻 ★ ☂"),
         )),
         section("Alignment", column(gap: 6, cross: CrossAlign.start)(
-            aligned("Start", TextAlign.start),
-            aligned("Center", TextAlign.center),
-            aligned("End", TextAlign.end),
+            alignedLabel("Start", TextAlign.start),
+            alignedLabel("Center", TextAlign.center),
+            alignedLabel("End", TextAlign.end),
         )),
     );
 }
 
 /// Label aligned by `a` in a 320 px panel.
-private Node aligned(string text, TextAlign a)
+private Node alignedLabel(string text, TextAlign a)
 {
     return sized(w: 320)(panel(variant: "header")(label(text, align_: a)));
 }
@@ -476,6 +478,43 @@ private Node block(string text)
     return panel(variant: "popup")(pad(x: 8, y: 6)(label(text, "muted")));
 }
 
+
+/// Grids with fixed and fitted columns, and stacks.
+Node gridsPage()
+{
+    Node[] buttons;
+    foreach (string s; ["New", "Open", "Save", "Import", "Export", "Quit"])
+    {
+        buttons ~= button(s, variant: "large");
+    }
+    Node[] tiles;
+    foreach (int i; 1 .. 15)
+    {
+        tiles ~= sized(h: 64)(panel(variant: "popup")(pad(x: 8, y: 6)(label(format("Tile %d", i), "muted"))));
+    }
+    return column(gap: 22)(
+        section("Fixed columns", sized(h: 160)(grid(cols: 3, gap: 8)(buttons))),
+        section("Columns that fit", column(gap: 6)(
+            label("At least 120 px each, as many as the width allows. Resize the window.", "muted"),
+            grid(minCell: 120, gap: 8)(tiles),
+        )),
+        section("Stack", line(
+            captioned("centered", stack(x: CrossAlign.center, y: CrossAlign.center)(
+                sized(w: 64, h: 64)(panel(variant: "popup")(new Fixed(Size.init))),
+                label("DD", "title"),
+            )),
+            captioned("aligned badge", stack()(
+                sized(w: 64, h: 64)(panel(variant: "popup")(new Fixed(Size.init))),
+                aligned(x: CrossAlign.end, y: CrossAlign.end)(panel(variant: "header")(pad(x: 5, y: 1)(
+                    label("3", "accent")))),
+            )),
+            captioned("stretched background", stack()(
+                aligned(x: CrossAlign.stretch, y: CrossAlign.stretch)(panel(variant: "popup")(new Fixed(Size.init))),
+                pad(x: 14, y: 10)(label("Sized by this text")),
+            )),
+        )),
+    );
+}
 /// Dock view with four panes.
 Node dockPage()
 {
