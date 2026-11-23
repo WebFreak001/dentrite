@@ -11,6 +11,8 @@ Known gaps, by area.
   cancelled.
 - A hidden window still draws the frames asked for, such as animations.
 - Window icons take one image, no extra sizes.
+- No system tray icon. A window hidden with `setVisible(false)` has no way back
+  for the user.
 
 ## Rendering
 

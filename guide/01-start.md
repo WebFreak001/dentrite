@@ -59,8 +59,10 @@ What each part does:
 - `label(() => ...)` takes a delegate, so the label follows `count`. A
   plain string makes a fixed label.
 - `w.run()` returns when the window closes or `w.running` is set to false.
-  It draws a frame only when something asked for one: input, a changed
-  signal that a node shows, a timer, or a wake from another thread.
+  `w.onCloseRequest` returning false keeps the window open, such as to hide
+  it or ask about unsaved changes. It draws a frame only when something
+  asked for one: input, a changed signal that a node shows, a timer, or a
+  wake from another thread.
 
 Without a theme every widget uses the dark look built into its style
 struct, variants included. Set `o.themePath` to a theme file to change it,

@@ -103,6 +103,8 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl
         SDL_SetHint("SDL_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR", "0");
         // NOTE: without it XIM and IBus show nothing until text is committed, such as a dead key's accent.
         SDL_SetHint("SDL_IME_IMPLEMENTED_UI", "composition");
+        // NOTE: else closing the window also sends a quit, which `Host.onCloseRequest` cannot cancel.
+        SDL_SetHint("SDL_QUIT_ON_LAST_WINDOW_CLOSE", "0");
         enforce(SDL_Init(SDL_INIT_VIDEO), "SDL_Init: " ~ error());
         wakeEvent = SDL_RegisterEvents(2);
         accessEvent = wakeEvent + 1;
@@ -360,6 +362,8 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl
         switch (s.type)
         {
         case SDL_EventType.quit:
+            e.kind = EventKind.quit;
+            break;
         case SDL_EventType.windowCloseRequested:
             e.kind = EventKind.close;
             break;

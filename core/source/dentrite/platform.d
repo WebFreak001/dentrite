@@ -60,7 +60,8 @@ struct Metrics
 enum EventKind
 {
     none,        /// nothing the host needs
-    close,       /// the user asked to close the window or quit
+    close,       /// the user asked to close the window, see `Host.onCloseRequest`
+    quit,        /// the system asked the app to quit, such as on a signal or logout
     resized,     /// size or scale changed, `Platform.metrics` has the new values
     exposed,     /// contents lost, draw again
     pointerLeft, /// pointer left the window

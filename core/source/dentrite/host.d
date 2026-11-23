@@ -88,6 +88,8 @@ class Host : Services
     /// App work at frame start, such as draining mailboxes. Tree changes made here show in the same frame and ask
     /// for no other, `requestFrame` still does.
     void delegate()[] beforeFrame;
+    /// Runs when the user asks to close the window, return false to keep it open. Null closes it.
+    bool delegate() onCloseRequest;
     string screenshotPath; /// PNG file written after the next frame, then cleared
     Platform platform;    /// window system side, see `Platform`
     Renderer renderer;    /// renderer drawing the frames
@@ -339,7 +341,7 @@ class Host : Services
 
     // Loop
 
-    /// Runs frames until `running` is set to false or the window closes.
+    /// Runs frames until `running` is set to false, the window closes or the system asks to quit.
     void run()
     {
         while (running)
@@ -540,6 +542,12 @@ class Host : Services
         case EventKind.none:
             break;
         case EventKind.close:
+            if (onCloseRequest is null || onCloseRequest())
+            {
+                running = false;
+            }
+            break;
+        case EventKind.quit:
             running = false;
             break;
         case EventKind.resized:
@@ -1238,6 +1246,34 @@ unittest
     h.run();
     assert(got == [["/tmp/a.txt", "/tmp/b.txt"], []] && p.fileAsks == [FileDialogKind.openMany,
         FileDialogKind.save]);
+}
+
+// `onCloseRequest` can keep the window open on close, a quit stops regardless.
+unittest
+{
+    import dentrite.backend.software : SoftwareRenderer;
+    import dentrite.headless : HeadlessPlatform;
+
+    WindowOptions o;
+    o.fonts = ["fonts/Inter-Regular.otf", "fonts/Inter-SemiBold.otf", "fonts/JetBrainsMono-Regular.ttf"];
+    Host h = new Host(new HeadlessPlatform(100, 100, 1), new SoftwareRenderer, o);
+    scope (exit)
+    {
+        h.close();
+    }
+    int asked;
+    bool allow;
+    h.onCloseRequest = () { ++asked; return allow; };
+    Event close = Event(EventKind.close);
+    Event quit = Event(EventKind.quit);
+    h.handle(close);
+    assert(asked == 1 && h.running);
+    h.handle(quit);
+    assert(asked == 1 && h.running == false);
+    h.running = true;
+    allow = true;
+    h.handle(close);
+    assert(asked == 2 && h.running == false);
 }
 
 // Window setters reach the platform, the title names the window for screen readers, and hiding ends a press.
