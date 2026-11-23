@@ -79,6 +79,8 @@ private extern (C) void fileAnswered(void* userdata, const(char*)* list, int fil
 final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl
 {
     Renderer renderer;              /// renderer drawing into this window, created along with it
+    /// Called with every SDL event on the UI thread, before the library handles it.
+    void delegate(ref const SDL_Event) onSdlEvent;
 
     private SDL_Window* win;        /// SDL window
     private SDL_GLContext gl;       /// GL context, null in software
@@ -280,6 +282,10 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl
         if ((ms == 0 ? SDL_PollEvent(&s) : SDL_WaitEventTimeout(&s, ms)) == false)
         {
             return false;
+        }
+        if (onSdlEvent !is null)
+        {
+            onSdlEvent(s);
         }
         e = translate(s);
         if (e.kind == EventKind.wake)
