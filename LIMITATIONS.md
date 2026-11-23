@@ -62,8 +62,8 @@ Known gaps, by area.
 - Lists, trees, tables: type-ahead matches the text start only.
 - Trees: no drag and drop.
 - Tables need a bounded height.
-- Virtual list: measured heights reset when items change, scroll is not
-  anchored when heights above the view change.
+- Virtual list: a width or theme change measures rows again, from the one at
+  the top of the view.
 - Text areas: plain text, no colors, tabs become spaces. Every edit writes the
   whole text to the signal. Relayout shapes every line, fine for thousands of
   lines, not huge files.

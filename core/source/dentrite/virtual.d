@@ -38,26 +38,31 @@ unittest
     assert(visibleFixed(0, 480, 16, 0) == RowRange(0, 0));
 }
 
-/// Row heights with prefix sums. Unmeasured rows count as `estimate`.
+/// Row heights with prefix sums.
 final class RowHeights
 {
     private double[] tree;   /// Fenwick tree, 1-based
     private float[] heights; /// current height per row
-    private float estimate;  /// height assumed before measuring
 
-    /// Creates `count` rows of `estimate` height.
+    /// Creates `count` rows of `estimate` height, for rows not measured yet.
     this(size_t count, float estimate)
     {
-        this.estimate = estimate;
-        heights = new float[count];
-        heights[] = estimate;
-        tree = new double[count + 1];
+        float[] h = new float[count];
+        h[] = estimate;
+        this(h);
+    }
+
+    /// Creates rows of heights `h`, which the rows keep.
+    this(float[] h)
+    {
+        heights = h;
+        tree = new double[h.length + 1];
         tree[] = 0;
-        foreach (size_t i; 1 .. count + 1)
+        foreach (size_t i; 1 .. h.length + 1)
         {
-            tree[i] += estimate;
+            tree[i] += h[i - 1];
             size_t j = i + (i & -i);
-            if (j <= count)
+            if (j <= h.length)
             {
                 tree[j] += tree[i];
             }
@@ -174,6 +179,32 @@ double restore(const RowHeights rows, Anchor a)
     return rows.offsetOf(a.row) + a.delta;
 }
 
+/// Index in `old` of each key of `next`, or -1 for a key not in `old`. Keys are unique in each.
+ptrdiff_t[] matchKeys(K)(K[] old, K[] next)
+{
+    size_t[K] at;
+    foreach (size_t i, K k; old)
+    {
+        at[k] = i;
+    }
+    ptrdiff_t[] from = new ptrdiff_t[next.length];
+    foreach (size_t i, K k; next)
+    {
+        const(size_t)* o = k in at;
+        from[i] = o is null ? -1 : *o;
+    }
+    return from;
+}
+
+// Matching keys: prepended, trimmed and moved keys find their old rows.
+unittest
+{
+    assert(matchKeys([3, 4], [1, 2, 3, 4]) == [-1, -1, 0, 1]);
+    assert(matchKeys([1, 2, 3, 4], [3, 4, 5]) == [2, 3, -1]);
+    assert(matchKeys(["a", "b", "c"], ["c", "a", "x"]) == [2, 0, -1]);
+    assert(matchKeys!int(null, [7]) == [-1]);
+}
+
 // Variable rows: Fenwick sums match a plain sum and lookups invert offsets.
 unittest
 {
@@ -214,6 +245,23 @@ unittest
         assert(rows.total == naive);
     }
     assert(rows.indexAt(rows.offsetOf(500)) == 500);
+}
+
+// Rows built from given heights sum like rows set one by one.
+unittest
+{
+    float[] h = [10, 20, 30, 40, 50];
+    RowHeights rows = new RowHeights(h.dup);
+    RowHeights set = new RowHeights(h.length, 1);
+    foreach (size_t i, float v; h)
+    {
+        set.set(i, v);
+    }
+    foreach (size_t i; 0 .. h.length + 1)
+    {
+        assert(rows.offsetOf(i) == set.offsetOf(i));
+    }
+    assert(rows.indexAt(65) == 3);
 }
 
 // Anchoring: rows above the viewport grow after measuring, the visible row stays put.

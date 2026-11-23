@@ -805,6 +805,9 @@ interface ViewportAware
 {
     /// Takes the visible part of the content, `height` tall from `top`, before layout and on every scroll.
     void viewport(float top, float height);
+    /// Distance to add to the scroll so the rows in view stay put after rows above them changed, then 0 until
+    /// they change again.
+    float takeShift();
 }
 
 /// Vertical scroll view over one child as tall as it wants.
@@ -836,28 +839,37 @@ final class ScrollView : Node
         return max(0f, contentH - size.h);
     }
 
-    /// Fills the constraints, lays the child out with unbounded height.
-    /// A ViewportAware child is laid out again if clamping the scroll moved the view.
+    /// Fills the constraints, lays the child out with unbounded height. A ViewportAware child is laid out again
+    /// while its shift, following the end or clamping moved the view.
     protected override Size performLayout(Constraints c)
     {
         Size own = Size(isInfinity(c.maxW) ? c.minW : c.maxW, isInfinity(c.maxH) ? c.minH : c.maxH);
         Constraints cc = Constraints(own.w, own.w, 0, float.infinity);
         ViewportAware va = cast(ViewportAware) children[0];
         size = own;
-        if (va !is null)
+        foreach (int pass; 0 .. 3)
         {
-            va.viewport(scrollY, own.h);
-        }
-        children[0].layout(cc);
-        if (follow && atBottom)
-        {
-            scrollY = maxScroll;
-        }
-        scrollY = clamp(scrollY, 0, maxScroll);
-        if (va !is null)
-        {
-            va.viewport(scrollY, own.h);
+            float shown = scrollY;
+            if (va !is null)
+            {
+                scrollY += va.takeShift();
+                shown = scrollY;
+                va.viewport(scrollY, own.h);
+            }
             children[0].layout(cc);
+            if (va !is null)
+            {
+                scrollY += va.takeShift();
+            }
+            if (follow && atBottom)
+            {
+                scrollY = maxScroll;
+            }
+            scrollY = clamp(scrollY, 0, maxScroll);
+            if (va is null || scrollY == shown)
+            {
+                break;
+            }
         }
         children[0].offset = contentOffset();
         return own;

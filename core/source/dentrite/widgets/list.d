@@ -6,7 +6,7 @@ import dentrite.containers;
 import dentrite.access : AccessFocus, contentText, textOnly;
 import dentrite.node;
 import dentrite.signals;
-import dentrite.virtual : RowHeights, RowRange;
+import dentrite.virtual : Anchor, capture, matchKeys, restore, RowHeights, RowRange;
 import dentrite.widgets.button : PressBehavior;
 import dentrite.widgets.label : Label;
 import std.algorithm.comparison : clamp, max, min;
@@ -159,12 +159,13 @@ KeyedColumn!(K, T) keyedColumn(K, T, R : Node)(T[] delegate() items, K delegate(
 /// to a pool and take the next key that enters it, so scrolling and filtering rebind a few rows
 /// instead of building them.
 ///
-/// Heights come from measuring rows. Unmeasured rows count as the first measured height. Rows paint into
-/// layers of their own, so scrolling moves their meshes and a changed row repaints alone.
+/// Heights come from measuring rows and follow their keys when the items change. Unmeasured rows count as the
+/// first measured height. In a scroll view, the row at the top of the view stays in place when rows above it
+/// change height or are added or removed, such as older messages loaded above. Rows paint into layers of their
+/// own, so scrolling moves their meshes and a changed row repaints alone.
 /// NOTE: row positions are floats, so rows past about 16 M px lose precision.
 /// NOTE: pooled rows keep following their last item. The row holding focus stays bound out of view, and focus
 /// is cleared when its item leaves the items, so keys never reach a row that took another item.
-/// TODO: keep measured heights across item changes, and anchor the scroll when heights above it change.
 final class VirtualList(K, T) : Node, ViewportAware, RowChooser, AccessFocus
 {
     int built;          /// rows built so far
@@ -184,12 +185,15 @@ final class VirtualList(K, T) : Node, ViewportAware, RowChooser, AccessFocus
     private K delegate(T) keyOf;             /// item key
     private Node delegate(T delegate()) make; /// builds a row reading its item through the getter
     private T[] items;          /// all items, in order
+    private K[] itemKeys;       /// key of each item
+    private K[] spareKeys;      /// buffer for the next `itemKeys`
     private RowHeights heights; /// row heights, null until the next layout
     private float estimate;     /// height of unmeasured rows, NaN before the first row is measured
     private float width;        /// width the heights belong to
     private uint styleVersion;  /// tree style version the estimate belongs to
     private float top = 0;      /// scroll distance, from the scroll view
     private float viewH = float.infinity; /// view height, everything until a scroll view says otherwise
+    private float shift = 0;    /// scroll move owed to the scroll view, see `takeShift`
     private RowRange bound;     /// rows bound and laid out
     private Slot[K] byKey;      /// bound slots
     private Slot[] active;      /// bound slots in item order
@@ -281,12 +285,95 @@ final class VirtualList(K, T) : Node, ViewportAware, RowChooser, AccessFocus
         return f is null || f.isInside(s.node) == false;
     }
 
-    /// Takes new items. Rows rebind at the next layout.
+    /// Takes new items. Rows rebind at the next layout. Measured heights follow their keys, and the row at the
+    /// top of the view stays in place when rows above it change.
     void setItems(T[] next)
     {
+        K[] nextKeys = spareKeys;
+        nextKeys.length = next.length;
+        nextKeys.assumeSafeAppend();
+        foreach (size_t i, T item; next)
+        {
+            nextKeys[i] = keyOf(item);
+        }
+        if (heights !is null)
+        {
+            carryHeights(nextKeys);
+        }
         items = next;
-        heights = null;
+        spareKeys = itemKeys;
+        itemKeys = nextKeys;
         markNeedsLayout();
+    }
+
+    /// Moves measured heights from the current keys to `next`. Unless the kept rows were reordered, such as by
+    /// sorting, the first one from the top of the view down stays in place. Appended items only add rows.
+    private void carryHeights(K[] next)
+    {
+        if (isNaN(estimate))
+        {
+            heights = null;
+            return;
+        }
+        if (next.length >= itemKeys.length && next[0 .. itemKeys.length] == itemKeys)
+        {
+            foreach (size_t i; itemKeys.length .. next.length)
+            {
+                heights.append(estimate);
+            }
+            return;
+        }
+        ptrdiff_t[] from = matchKeys(itemKeys, next);
+        float[] h = new float[next.length];
+        size_t topRow = heights.indexAt(top);
+        ptrdiff_t kept = -1; /// new index of the first kept row from the top of the view down
+        ptrdiff_t last = -1; /// old index of the last kept row so far
+        bool ordered = true; /// kept rows are in their old order, so only rows were added or removed
+        foreach (size_t i, ptrdiff_t o; from)
+        {
+            h[i] = o < 0 ? estimate : heights.height(o);
+            if (o < 0)
+            {
+                continue;
+            }
+            ordered = ordered && o > last;
+            last = o;
+            if (kept < 0 && cast(size_t) o >= topRow)
+            {
+                kept = i;
+            }
+        }
+        RowHeights old = heights;
+        heights = new RowHeights(h);
+        if (kept < 0 || ordered == false)
+        {
+            return;
+        }
+        double was = old.offsetOf(from[kept]);
+        if (was < top + viewH)
+        {
+            keepAnchor(Anchor(kept, top - was));
+        }
+    }
+
+    /// Moves the view so `a` is back at its top, owing the move to the scroll view. Nothing outside one.
+    private void keepAnchor(Anchor a)
+    {
+        if (isInfinity(viewH))
+        {
+            return;
+        }
+        float y = cast(float) restore(heights, a);
+        shift += y - top;
+        top = y;
+    }
+
+    /// Scroll move owed since the last call, and forgets it.
+    float takeShift()
+    {
+        float s = shift;
+        shift = 0;
+        return s;
     }
 
     /// Bound row of key `k`, or null.
@@ -802,7 +889,10 @@ final class VirtualList(K, T) : Node, ViewportAware, RowChooser, AccessFocus
     {
         float w = isInfinity(c.maxW) ? c.minW : c.maxW;
         Constraints rc = Constraints(w, w, 0, float.infinity);
-        if (styleVersion != tree.styleVersion)
+        bool restyled = styleVersion != tree.styleVersion;
+        bool remeasure = heights !is null && (restyled || w != width);
+        Anchor a = remeasure ? capture(heights, top) : Anchor.init;
+        if (restyled)
         {
             styleVersion = tree.styleVersion;
             estimate = float.nan;
@@ -821,10 +911,15 @@ final class VirtualList(K, T) : Node, ViewportAware, RowChooser, AccessFocus
         if (heights is null)
         {
             heights = new RowHeights(items.length, isNaN(estimate) ? 1 : estimate);
+            if (remeasure)
+            {
+                keepAnchor(a);
+            }
         }
         foreach (int pass; 0 .. 3)
         {
             bind(heights.visible(top, viewH, overscan));
+            a = capture(heights, top);
             bool measured;
             foreach (Slot s; active)
             {
@@ -839,6 +934,7 @@ final class VirtualList(K, T) : Node, ViewportAware, RowChooser, AccessFocus
             {
                 break;
             }
+            keepAnchor(a);
         }
         foreach (Slot s; active)
         {
@@ -1561,6 +1657,87 @@ unittest
     assert(list[1].bounds.y == 10 && list[2].bounds.y == 40 && list[3].bounds.y == 50);
     assert(list.size.h == 8 * 10 + 7 * 30 + 85 * 10, "rows 0 to 14 measured, the rest estimated at 10");
     assert(list.children.length == 10, "rows 0 to 5 fill the view, plus 4 below");
+}
+
+// Measuring taller rows above the view keeps the row at its top in place.
+unittest
+{
+    import std.array : array;
+    import std.range : iota;
+
+    Signal!(int[]) items = signal(iota(100).array);
+    int runs;
+    ScrollView sv;
+    Tree t;
+    VirtualList!(int, int) list;
+    effectScope(() {
+        list = probeList(items, Size(50, 100), &runs, (int i) => i % 2 == 1, sv, t);
+    });
+    sv.scrollTo(600);
+    t.flush();
+    assert(list[46] !is null && list[46].bounds.y == 0, "row 46 was at 600 before rows 43 and 45 grew");
+    assert(sv.scrollY == 640);
+}
+
+// Item changes keep measured heights. Rows added or trimmed above the view leave its top row in place. Sorting
+// does not move the view to follow it.
+unittest
+{
+    import std.array : array;
+    import std.range : iota, retro;
+
+    Signal!(int[]) items = signal(iota(100).array);
+    int runs;
+    ScrollView sv;
+    Tree t;
+    VirtualList!(int, int) list;
+    effectScope(() {
+        list = probeList(items, Size(50, 100), &runs, (int i) => i % 2 == 1, sv, t);
+    });
+    sv.scrollTo(100);
+    t.flush();
+    Node five = list[5];
+    assert(five.bounds.y == -10, "row 5 spans 90 to 120");
+    float total = list.size.h;
+
+    items.set(items.peek ~ [100, 101]);
+    t.flush();
+    assert(list.size.h == total + 20 && sv.scrollY == 100 && list[5] is five);
+
+    items.set(iota(-20, 0).array ~ items.peek);
+    t.flush();
+    assert(list.size.h == total + 220, "rows 0 to 14 keep their measured heights");
+    assert(sv.scrollY == 300 && list[5] is five && five.bounds.y == -10);
+
+    items.set(items.peek[25 .. $]);
+    t.flush();
+    assert(sv.scrollY == 10 && five.bounds.y == -10, "rows -20 to 4 took 290 px above");
+
+    items.set(items.peek.retro.array);
+    t.flush();
+    assert(list[5] is null && sv.scrollY < 100, "sorting does not follow row 5 down");
+}
+
+// Following the end wins over keeping the top row.
+unittest
+{
+    import std.array : array;
+    import std.range : iota;
+
+    Signal!(int[]) items = signal(iota(50).array);
+    int runs;
+    VirtualList!(int, int) list = virtualList!(int, int)(&items.get, (int i) => i,
+        (int delegate() item) => probeRow(item, &runs, (int i) => false));
+    ScrollView sv = scroll(follow: true)(list);
+    Tree t = bareTree(sv, Size(50, 100));
+    t.flush();
+    assert(sv.scrollY == 400);
+    items.set(iota(-10, 0).array ~ items.peek);
+    t.flush();
+    assert(sv.scrollY == 500);
+    items.set(items.peek[20 .. $] ~ [50]);
+    t.flush();
+    assert(sv.scrollY == 310);
 }
 
 // Sibling rows are one Tab stop at the selected row, and arrows click the next enabled row without wrapping.
