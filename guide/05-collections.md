@@ -110,6 +110,15 @@ Home and End. More options on `virtualList`, `table` and `treeView`:
 Place a virtual list in a `scroll()`. Row heights come from measuring the
 rows, so they may differ.
 
+Measured heights follow their keys when the items change. In a scroll view,
+the row at the top of the view stays in place when items are added or removed
+above it, such as older messages loaded at the top. `scroll(follow: true)`
+keeps showing the end while scrolled to it, for chats and logs.
+
+Only the rows in view are nodes, reused as the list scrolls, so a long feed
+costs its items and not its widgets. Cap the items in the app, such as keeping
+the newest 1,000 once 2,000 arrived.
+
 ## Tables
 
 <!-- src="examples/source/guide/collections.d" from="Node logTable(" -->

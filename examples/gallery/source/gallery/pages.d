@@ -36,6 +36,7 @@ import dentrite.widgets.textarea;
 import dentrite.widgets.textbox;
 import dentrite.widgets.tooltip : commandTip;
 import dentrite.widgets.tree;
+import std.algorithm.iteration : map;
 import std.algorithm.searching : canFind, count;
 import std.algorithm.comparison : clamp, max, min;
 import std.array : array, join;
@@ -98,6 +99,8 @@ Page[] pages(Gallery g)
         Page("Dialogs", "Modal dialogs over a scrim, and the system's file dialogs.", () => dialogsPage(g)),
         Page("Tooltips", "Text shown after resting the pointer on a node.", () => tooltipsPage()),
         Page("Lists", "Keyed rows rebuilt from a signal, and a virtual list of 100,000 rows.", () => listsPage()),
+        Page("Chat feed", "A feed that follows new messages, loads older ones above and caps what it keeps.",
+            () => chatPage()),
         Page("Trees", "Hierarchies that expand and collapse, listing only the rows in view.", () => treesPage()),
         Page("Tables", "Columns that sort and resize over a virtual list of rows.", () => tablesPage()),
         Page("Layout", "Rows, columns, padding, panels, separators, flex and scrolling.", () => layoutPage()),
@@ -431,6 +434,100 @@ private Node bigRow(Signal!size_t selected, size_t delegate() r)
     ));
 }
 
+
+/// Message of the chat page.
+private struct Message
+{
+    long id;       /// order, older messages lower
+    string author; /// sender
+    string text;   /// body, wrapped in its row
+}
+
+/// Sample message `id`, with a body whose length varies with the id.
+private Message sampleMessage(long id)
+{
+    static immutable string[] authors = ["Ada", "Brook", "Cyd", "Dee"];
+    static immutable string[] words = ["the", "build", "passed", "again", "after", "moving", "rows", "into", "a",
+        "pool", "so", "memory", "stays", "flat", "while", "messages", "keep", "coming", "in"];
+    ulong h = cast(ulong) id * 2_654_435_761;
+    string[] w;
+    foreach (size_t k; 0 .. 3 + (h >> 7) % 45)
+    {
+        w ~= words[((h ^ (k * 0x9E37_79B9_7F4A_7C15)) >> 29) % words.length];
+    }
+    return Message(id, authors[(h >> 3) % authors.length], format("#%d: %s", id, w.join(" ")));
+}
+
+/// Chat feed: a virtual list following the end, older messages loaded above, and a cap on kept messages.
+Node chatPage()
+{
+    enum size_t keep = 1000; /// messages kept once twice as many arrived
+    Signal!(Message[]) log = signal(iota(-200L, 0L).map!sampleMessage.array);
+    Signal!string draft = signal("");
+    long next = 0;
+    /// Appends `more`, dropping the oldest past the cap.
+    void post(Message[] more)
+    {
+        Message[] all = log.peek ~ more;
+        log.set(all.length > 2 * keep ? all[$ - keep .. $] : all);
+    }
+
+    /// Sends the draft as a message from "You".
+    void send()
+    {
+        if (draft.peek.length > 0)
+        {
+            post([Message(next++, "You", draft.peek)]);
+            draft.set("");
+        }
+    }
+
+    /// Prepends 50 messages older than the oldest kept.
+    void loadOlder()
+    {
+        long oldest = log.peek.length > 0 ? log.peek[0].id : next;
+        log.set(iota(oldest - 50, oldest).map!sampleMessage.array ~ log.peek);
+    }
+
+    /// Appends 100 sample messages.
+    void burst()
+    {
+        post(iota(next, next + 100).map!sampleMessage.array);
+        next += 100;
+    }
+
+    Command sendCmd = command("Send", &send, keys: "Enter");
+    VirtualList!(long, Message) feed = virtualList!(long, Message)(items: () => log.get,
+        key: (Message m) => m.id, row: (Message delegate() m) => messageRow(m));
+    return column(gap: 22)(
+        section("Feed", column(gap: 8)(
+            narrow(520, sized(h: 320)(panel(variant: "pane")(scroll(follow: true)(feed)))),
+            row(gap: 8)(
+                sized(w: 240)(shortcuts([sendCmd])(textBox(draft, placeholder: "Message", accessName: "Message"))),
+                button("Send", onClick: &send),
+                button("Burst of 100", onClick: &burst),
+                button("Load older", onClick: &loadOlder),
+            ),
+            label(() => format("%,d messages kept, #%d to #%d", log.get.length,
+                log.get.length > 0 ? log.get[0].id : 0, log.get.length > 0 ? log.get[$ - 1].id : 0), "muted"),
+        )),
+        section("Memory", label("Row nodes exist only for the messages in view and are reused as the feed "
+            ~ "scrolls, so a long feed costs its messages, not its widgets. The page keeps at most "
+            ~ format("%,d", 2 * keep) ~ " messages and drops the oldest down to " ~ format("%,d", keep) ~ ". "
+            ~ "Measured heights follow their messages, and the message at the top of the view stays in place "
+            ~ "when older ones load above or are dropped. Scrolled to the end, the feed follows new messages.",
+            "muted", wrap: true)),
+    );
+}
+
+/// Row of the chat feed: the author over the wrapped body of the message `m` returns.
+private Node messageRow(Message delegate() m)
+{
+    return pad(x: 10, y: 6)(column(gap: 2)(
+        label(() => m().author, "strong"),
+        label(() => m().text, wrap: true),
+    ));
+}
 /// Containers: rows and columns, padding, panels, separators, flex and scrolling.
 Node layoutPage()
 {
