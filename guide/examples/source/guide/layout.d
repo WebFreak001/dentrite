@@ -2,7 +2,9 @@
 module guide.layout;
 
 import dentrite.containers;
+import dentrite.host : Host;
 import dentrite.node;
+import dentrite.signals;
 import dentrite.widgets.button;
 import dentrite.widgets.icons;
 import dentrite.widgets.label;
@@ -48,6 +50,20 @@ Node tiles(string[] names)
         ));
     }
     return grid(minCell: 120, gap: 8)(cells);
+}
+
+/// Sidebar beside the content while the window is over 600 px wide, the content alone otherwise. Both are built
+/// once and only attached, so they keep their state.
+Node adaptive(Host h, Node side, Node content)
+{
+    Computed!bool narrow = h.breakpoint(maxW: 600);
+    Node rule = vrule();
+    Node main = expanded(content);
+    Flex holder = row(cross: CrossAlign.stretch)();
+    effect(() {
+        holder.setChildren(narrow.get ? [main] : [side, rule, main]);
+    });
+    return holder;
 }
 
 /// The sidebar keeps its width, the content takes the rest, and the bars stay at the edges.
@@ -109,4 +125,35 @@ unittest
     assert(g.children[3].bounds == Rect(0, 88, 128, 80), "fourth tile starts the second row");
     Node name = g.children[0].children[0].children[1];
     assert(name.bounds.bottom == 80);
+}
+
+/// The sidebar leaves when the window narrows to 600 px and comes back when it widens.
+unittest
+{
+    import dentrite.headless : HeadlessPlatform;
+    import dentrite.platform : Event, EventKind, Metrics;
+    import guide.harness;
+
+    Host h = testHost(800, 600);
+    scope (exit)
+    {
+        h.close();
+    }
+    void resize(int w)
+    {
+        (cast(HeadlessPlatform) h.platform).size = Metrics(w, 600, 1);
+        Event e = Event(EventKind.resized);
+        h.handle(e);
+        h.frame();
+    }
+
+    Node side = sized(w: 180)(label("Files"));
+    Node content = label("Text");
+    scope Scope s = effectScope(() { h.setRoot(adaptive(h, side, content)); });
+    h.frame();
+    assert(side.parent !is null && content.bounds.x > 180);
+    resize(600);
+    assert(side.parent is null && content.bounds.x == 0 && content.size.w == 600);
+    resize(700);
+    assert(side.parent !is null && content.bounds.x > 180);
 }

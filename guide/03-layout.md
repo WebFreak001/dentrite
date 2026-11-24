@@ -137,6 +137,34 @@ unbounded axis. Give them a bound with `expanded` or `sized`:
 
 Labels wrap only with `label(text, wrap: true)`, at the width they get.
 
+## Window size
+
+`h.breakpoint(minW:, maxW:, minH:, maxH:)` is a computed value, true while
+the window size is within the ranges, bounds included, in logical pixels.
+Its readers rerun only when the window crosses a bound, so an effect on it
+changes the layout like a CSS media query. `h.windowSize` is the size
+itself, also tracked.
+
+<!-- src="examples/source/guide/layout.d" from="Node adaptive(" -->
+```d
+/// Sidebar beside the content while the window is over 600 px wide, the content alone otherwise. Both are built
+/// once and only attached, so they keep their state.
+Node adaptive(Host h, Node side, Node content)
+{
+    Computed!bool narrow = h.breakpoint(maxW: 600);
+    Node rule = vrule();
+    Node main = expanded(content);
+    Flex holder = row(cross: CrossAlign.stretch)();
+    effect(() {
+        holder.setChildren(narrow.get ? [main] : [side, rule, main]);
+    });
+    return holder;
+}
+```
+
+Breakpoints follow the window, not the space a node gets, such as a pane
+the user resized in a dock.
+
 ## Other layouts
 
 The dock (`dentrite.dock`) arranges panes in tab stacks and splits that the

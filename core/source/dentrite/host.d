@@ -19,6 +19,7 @@ import dentrite.node;
 import dentrite.overlay : Popup, PopupStyle;
 import dentrite.platform;
 import dentrite.png : encodePNG;
+import dentrite.signals : Computed, Signal, computed, signal;
 import dentrite.text;
 import dentrite.theme : Theme;
 import dentrite.widgets.button : ButtonStyle;
@@ -134,6 +135,7 @@ class Host : Services
     private PopupWindows popupWindows; /// platform side of popups in windows of their own, null without
     private Shown[] shown;          /// popups in windows of their own, bottom first
     private uint pointerSurface;    /// surface of the last pointer event, 0 for the main window
+    private Signal!Size sizeNow;    /// window size in logical pixels, for `windowSize`
 
     /// Takes over `p` and `r`, loads fonts and the theme.
     this(Platform p, Renderer r, WindowOptions o)
@@ -164,6 +166,7 @@ class Host : Services
         mesh = new FrameMesh;
         compositor.cache = o.cachePaint;
         clock = FrameClock(o.maxFps);
+        sizeNow = signal(Size.init);
         updateSize();
     }
 
@@ -222,6 +225,7 @@ class Host : Services
         Rect area = popupWindows is null || visible == false ? Rect.init : popupWindows.popupArea();
         tree.root.screen = Rect(area.x / scale, area.y / scale, area.w / scale, area.h / scale);
         requestFrame();
+        sizeNow.set(tree.viewport);
     }
 
     // Services
@@ -1264,6 +1268,23 @@ class Host : Services
         }
     }
 
+    /// Window size in logical pixels, tracked by the running effect or computed.
+    Size windowSize()
+    {
+        return sizeNow.get;
+    }
+
+    /// True while the window size is within the ranges, bounds included, in logical pixels. Its readers rerun
+    /// only when the window crosses a bound.
+    Computed!bool breakpoint(float minW = 0, float maxW = float.infinity, float minH = 0,
+        float maxH = float.infinity)
+    {
+        return computed(() {
+            Size s = sizeNow.get;
+            return s.w >= minW && s.w <= maxW && s.h >= minH && s.h <= maxH;
+        });
+    }
+
     /// Window title.
     string title()
     {
@@ -1591,4 +1612,49 @@ unittest
     assert(p.popups.length == 2 && p.popups[1].id == 2);
     h.close();
     assert(p.popups[1].closed);
+}
+
+// Breakpoints follow resizes in logical pixels, bounds included, and rerun their readers only on crossing one.
+unittest
+{
+    import dentrite.backend.software : SoftwareRenderer;
+    import dentrite.headless : HeadlessPlatform;
+    import dentrite.signals : Scope, effect, effectScope;
+
+    WindowOptions o;
+    o.fonts = ["fonts/Inter-Regular.otf", "fonts/Inter-SemiBold.otf", "fonts/JetBrainsMono-Regular.ttf"];
+    HeadlessPlatform p = new HeadlessPlatform(500, 300, 2);
+    Host h = new Host(p, new SoftwareRenderer, o);
+    scope (exit)
+    {
+        h.close();
+    }
+    assert(h.windowSize == Size(500, 300));
+    void resize(int w, int hh)
+    {
+        p.size = Metrics(w * 2, hh * 2, 2);
+        Event e = Event(EventKind.resized);
+        h.handle(e);
+    }
+
+    bool narrow;
+    bool tall;
+    int runs;
+    scope Scope s = effectScope(() {
+        Computed!bool n = h.breakpoint(maxW: 600);
+        Computed!bool t = h.breakpoint(minH: 400);
+        effect(() { narrow = n.get; tall = t.get; ++runs; });
+    });
+    assert(narrow && tall == false && runs == 1);
+    resize(600, 300);
+    assert(narrow && runs == 1);
+    resize(601, 300);
+    assert(narrow == false && runs == 2);
+    resize(900, 350);
+    assert(runs == 2);
+    resize(900, 400);
+    assert(narrow == false && tall && runs == 3);
+    resize(320, 200);
+    assert(narrow && tall == false && runs == 4);
+    assert(h.windowSize == Size(320, 200));
 }
