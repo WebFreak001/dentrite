@@ -39,6 +39,7 @@ import dentrite.widgets.textbox : TextBoxStyle;
 import dentrite.widgets.tooltip : TooltipStyle, Tooltips;
 import dentrite.widgets.tree : TreeStyle;
 import std.algorithm.comparison : min;
+import std.math : ceil, round;
 import std.meta : AliasSeq;
 import std.stdio : stderr;
 import std.utf : stride;
@@ -75,6 +76,15 @@ struct FrameStats
     size_t batches;      /// draw batches sent to the renderer
     int boundaries;      /// relayout boundaries laid out
     int islandPasses;    /// islands that ran a pass
+}
+
+/// Popup in an OS window of its own.
+private struct Shown
+{
+    Popup popup;        /// popup shown
+    PopupWindow window; /// its window
+    Rect at;            /// window rectangle in physical pixels from the main window's top left
+    FrameMesh mesh;     /// its frame
 }
 
 /// Retained UI on a platform and a renderer. One per process for now.
@@ -120,6 +130,9 @@ class Host : Services
     private AccessAdapter accessAdapter; /// platform side when `WindowOptions.accessibility` is set
     private ulong accessFocus;      /// focus id last sent to the adapter
     private AccessTree lookup;      /// description for `find`, apart from what the adapter was sent
+    private PopupWindows popupWindows; /// platform side of popups in windows of their own, null without
+    private Shown[] shown;          /// popups in windows of their own, bottom first
+    private uint pointerSurface;    /// surface of the last pointer event, 0 for the main window
 
     /// Takes over `p` and `r`, loads fonts and the theme.
     this(Platform p, Renderer r, WindowOptions o)
@@ -142,6 +155,10 @@ class Host : Services
         if (o.accessibility)
         {
             accessAdapter = cast(AccessAdapter) p;
+        }
+        if (o.popupWindows)
+        {
+            popupWindows = cast(PopupWindows) p;
         }
         mesh = new FrameMesh;
         compositor.cache = o.cachePaint;
@@ -167,6 +184,11 @@ class Host : Services
             return;
         }
         closed = true;
+        foreach_reverse (ref Shown s; shown)
+        {
+            s.window.close();
+        }
+        shown = null;
         renderer.dispose();
         text.dispose();
         platform.close();
@@ -196,6 +218,8 @@ class Host : Services
             tree.restyle();
         }
         tree.viewport = Size(pixelW / scale, pixelH / scale);
+        Rect area = popupWindows is null || visible == false ? Rect.init : popupWindows.popupArea();
+        tree.root.screen = Rect(area.x / scale, area.y / scale, area.w / scale, area.h / scale);
         requestFrame();
     }
 
@@ -416,16 +440,47 @@ class Host : Services
                 tooltips.pointer(reachableAt(mouse), mouse);
             }
         }
+        syncPopups();
         MonoTime t2 = MonoTime.currTime;
         compositor.tess.ppp = scale;
         compositor.tess.text = text;
         compositor.compose(tree.root.paintLayer, mesh, pixelW, pixelH);
+        stats.commands = compositor.commands;
+        stats.layersRecorded = compositor.recorded;
+        stats.layersReused = compositor.reused;
+        stats.vertices = compositor.vertices;
+        stats.meshBytes = compositor.meshBytes;
+        stats.batches = mesh.batches.length;
+        Duration painting = compositor.painting;
+        Duration tessellating = compositor.tessellating;
+        bool missed = mesh.missedGlyphs;
+        // NOTE: every mesh before any render, as composing can add atlas rows a renderer that already drew misses
+        foreach (ref Shown s; shown)
+        {
+            Rect b = s.popup.bounds;
+            Point origin = Point(b.x - s.at.x / scale, b.y - s.at.y / scale);
+            compositor.compose(s.popup.paintLayer, s.mesh, cast(int) s.at.w, cast(int) s.at.h, origin);
+            painting += compositor.painting;
+            tessellating += compositor.tessellating;
+            stats.commands += compositor.commands;
+            stats.layersRecorded += compositor.recorded;
+            stats.layersReused += compositor.reused;
+            stats.vertices += compositor.vertices;
+            stats.meshBytes += compositor.meshBytes;
+            stats.batches += s.mesh.batches.length;
+            missed = missed || s.mesh.missedGlyphs;
+        }
         tree.paintRequested = false;
         placeInputArea();
         updateAccess();
         MonoTime t4 = MonoTime.currTime;
         Color clear = tree.style!WindowStyle().background;
+        clear.a = 0xff;
         renderer.render(mesh, text.atlas, clear);
+        foreach (ref Shown s; shown)
+        {
+            s.window.draw(s.mesh, text.atlas);
+        }
         MonoTime t5 = MonoTime.currTime;
         if (screenshotPath.length > 0)
         {
@@ -437,25 +492,93 @@ class Host : Services
         }
         platform.present();
         text.endFrame();
-        if (mesh.missedGlyphs)
+        if (missed)
         {
             requestFrame();
         }
         stats.frames += 1;
         stats.layout = t1 - t0;
         stats.islands = t2 - t1;
-        stats.paint = compositor.painting;
-        stats.tessellate = compositor.tessellating;
-        stats.compose = t4 - t2 - compositor.painting - compositor.tessellating;
+        stats.paint = painting;
+        stats.tessellate = tessellating;
+        stats.compose = t4 - t2 - painting - tessellating;
         stats.render = t5 - t4;
         stats.total = t5 - frameTime;
-        stats.commands = compositor.commands;
-        stats.layersRecorded = compositor.recorded;
-        stats.layersReused = compositor.reused;
-        stats.vertices = compositor.vertices;
-        stats.meshBytes = compositor.meshBytes;
-        stats.batches = mesh.batches.length;
         stats.boundaries = boundaries;
+    }
+
+    /// Opens, moves and closes popup windows to match the popups that `Stage.place` gave windows of their own.
+    /// Each sits above the window of the one below it, so a window and the ones above it close together.
+    private void syncPopups()
+    {
+        if (popupWindows is null && shown.length == 0)
+        {
+            return;
+        }
+        Popup[] want;
+        foreach (Popup p; tree.root.popups)
+        {
+            if (p.windowed)
+            {
+                want ~= p;
+            }
+        }
+        size_t keep;
+        while (keep < shown.length && keep < want.length && shown[keep].popup is want[keep])
+        {
+            ++keep;
+        }
+        foreach_reverse (ref Shown s; shown[keep .. $])
+        {
+            s.window.close();
+        }
+        shown.length = keep;
+        foreach (ref Shown s; shown)
+        {
+            Rect r = popupRect(s.popup);
+            if (r != s.at)
+            {
+                s.at = r;
+                s.window.move(r);
+            }
+        }
+        foreach (Popup p; want[keep .. $])
+        {
+            Rect r = popupRect(p);
+            PopupWindow w = popupWindows.openPopup(shown.length > 0 ? shown[$ - 1].window : null, r,
+                p.passPointer == false);
+            if (w is null)
+            {
+                stderr.writeln("dentrite: popup window failed, keeping popups inside the window");
+                popupWindows = null;
+                tree.root.screen = Rect.init;
+                tree.root.markNeedsLayout();
+                return;
+            }
+            shown ~= Shown(p, w, r, new FrameMesh);
+        }
+    }
+
+    /// Window rectangle for `p` in physical pixels from the main window's top left, with room for its shadow.
+    private Rect popupRect(Popup p)
+    {
+        Rect b = p.bounds;
+        float room = round(tree.style!PopupStyle().room * scale);
+        return Rect(round(b.x * scale) - room, round(b.y * scale) - room, ceil(b.w * scale) + room * 2,
+            ceil(b.h * scale) + room * 2);
+    }
+
+    /// Popup in a window of its own with `id`, or null.
+    private Shown* shownWith(uint id)
+    {
+        foreach (ref Shown s; shown)
+        {
+            if (s.window.id == id)
+            {
+                return &s;
+            }
+        }
+        return null;
     }
 
     /// Tells the platform where the focused node's caret is, if it changed since last time.
@@ -565,6 +688,10 @@ class Host : Services
             requestFrame();
             break;
         case EventKind.pointerLeft:
+            if (e.surface != pointerSurface)
+            {
+                break;
+            }
             pointerIn = false;
             if (captureNode is null)
             {
@@ -584,7 +711,13 @@ class Host : Services
             tree.root.dismissAll();
             break;
         case EventKind.pointer:
-            mouse = Point(e.pos.x / scale, e.pos.y / scale);
+            Point to;
+            if (fromSurface(e, to) == false)
+            {
+                break;
+            }
+            mouse = to;
+            pointerSurface = e.surface;
             final switch (e.pointer)
             {
             case PointerKind.move:
@@ -603,7 +736,11 @@ class Host : Services
             }
             break;
         case EventKind.wheel:
-            routeWheel(WheelEvent(Point(e.pos.x / scale, e.pos.y / scale), e.dx * 48, e.dy * 48, e.mods));
+            Point at;
+            if (fromSurface(e, at))
+            {
+                routeWheel(WheelEvent(at, e.dx * 48, e.dy * 48, e.mods));
+            }
             break;
         case EventKind.key:
             key(KeyEvent(e.key, e.mods, e.repeat));
@@ -621,7 +758,32 @@ class Host : Services
         case EventKind.access:
             runAccess(e.request);
             break;
+        case EventKind.dismissed:
+            if (Shown* s = shownWith(e.surface))
+            {
+                s.popup.close();
+            }
+            requestFrame();
+            break;
         }
+    }
+
+    /// Sets `at` to the position of `e` in logical window coordinates. False if it came from a popup window
+    /// closed since.
+    private bool fromSurface(ref const Event e, out Point at)
+    {
+        Point p = e.pos;
+        if (e.surface != 0)
+        {
+            Shown* s = shownWith(e.surface);
+            if (s is null)
+            {
+                return false;
+            }
+            p = p + s.at.pos;
+        }
+        at = Point(p.x / scale, p.y / scale);
+        return true;
     }
 
     /// Deepest node under `p` that a popup does not block, or null.
@@ -1127,7 +1289,7 @@ class Host : Services
             handle(left);
         }
         c.setVisible(on);
-        requestFrame();
+        updateSize();
     }
 
     /// Sets the smallest size the user can resize the window to, in logical pixels, 0 for no limit.
@@ -1352,4 +1514,65 @@ unittest
     again = true;
     h.frame();
     assert(h.clock.requested);
+}
+
+// A popup past the window edge draws in a window of its own, with room for its shadow, and not in the main frame.
+// Its input maps back to window coordinates, events from a closed one are dropped, and a system dismissal closes
+// it.
+unittest
+{
+    import dentrite.backend.software : SoftwareRenderer;
+    import dentrite.containers : column;
+    import dentrite.headless : HeadlessPlatform, HeadlessPopup;
+    import dentrite.overlay : popup;
+    import dentrite.widgets.button : Button, button;
+
+    WindowOptions o;
+    o.fonts = ["fonts/Inter-Regular.otf", "fonts/Inter-SemiBold.otf", "fonts/JetBrainsMono-Regular.ttf"];
+    HeadlessPlatform p = new HeadlessPlatform(200, 100, 2);
+    p.screen = Rect(-400, -200, 1200, 800);
+    SoftwareRenderer r = new SoftwareRenderer;
+    Host h = new Host(p, r, o);
+    scope (exit)
+    {
+        h.close();
+    }
+    int clicks;
+    Button item = button("Item", () { ++clicks; });
+    Popup menu = popup()(item);
+    h.setRoot(column()());
+    menu.openAt(h.tree, Point(190, 90));
+    h.frame();
+    assert(menu.windowed && p.popups.length == 1);
+    HeadlessPopup w = p.popups[0];
+    Rect b = menu.bounds;
+    assert(b.x == 190 && b.y == 90 && w.input && w.parent is null);
+    assert(w.at == Rect(380 - 32, 180 - 32, ceil(b.w * 2) + 64, b.h * 2 + 64) && w.drawn == 1 && w.batches > 0);
+    Color bg = WindowStyle.init.background;
+    assert(r.pixels[$ - 1] == (bg.r | bg.g << 8 | bg.b << 16 | 0xff000000), "not in the main frame");
+
+    Point local = Point((item.bounds.x + item.bounds.w / 2) * 2 - w.at.x, (item.bounds.y + 4) * 2 - w.at.y);
+    Event down = { kind: EventKind.pointer, surface: 1, pointer: PointerKind.down, pos: local, button: 1, clicks: 1 };
+    Event up = { kind: EventKind.pointer, surface: 1, pointer: PointerKind.up, pos: local, button: 1, clicks: 1 };
+    h.handle(down);
+    h.handle(up);
+    assert(clicks == 1);
+
+    Event dismissed = { kind: EventKind.dismissed, surface: 1 };
+    h.handle(dismissed);
+    assert(menu.isOpen == false);
+    h.frame();
+    assert(w.closed);
+    h.handle(down);
+    h.handle(up);
+    assert(clicks == 1, "dropped");
+
+    menu.openAt(h.tree, Point(10, 10));
+    h.frame();
+    assert(menu.windowed == false && p.popups.length == 1, "fits");
+    menu.openAt(h.tree, Point(190, 90));
+    h.frame();
+    assert(p.popups.length == 2 && p.popups[1].id == 2);
+    h.close();
+    assert(p.popups[1].closed);
 }

@@ -337,6 +337,16 @@ Node menusPage(Gallery g)
     }
     Menu long_ = popupMenu(files);
     recent.onClick = () { long_.toggle(recent); };
+    Button cornerButton = button("Corner menu", icon: Icon.chevronDown);
+    Menu corner = popupMenu(
+        menuItem("&First", g.note("First")),
+        menuItem("&Second", g.note("Second")),
+        menu("&More")(menuItem("&Third", g.note("Third")), menuItem("F&ourth", g.note("Fourth"))),
+    );
+    cornerButton.onClick = () {
+        Size vp = cornerButton.tree.viewport;
+        corner.openAt(cornerButton.tree, Point(vp.w - 4, vp.h - 4));
+    };
     Node area = contextMenu(
         menuItem("&Cut", g.note("Cut"), keys: "Ctrl+X"),
         menuItem("C&opy", g.note("Copy"), keys: "Ctrl+C"),
@@ -352,6 +362,8 @@ Node menusPage(Gallery g)
         section("Popup menu", line(options, label("Opens below the button, flips up near the bottom.", "muted"))),
         section("Long menu", line(recent, label("Items past the room scroll, with the wheel, the thumb or the "
             ~ "arrow keys.", "muted"))),
+        section("Past the window", line(cornerButton,
+            label("Opens at the window's bottom-right corner and reaches past it.", "muted"))),
         section("Context menu", area),
         section("Word wrap", label(() => g.wrap.get ? "Word wrap is on" : "Word wrap is off", "muted")),
     );
@@ -361,8 +373,8 @@ Node menusPage(Gallery g)
 Node tooltipsPage()
 {
     Command save = command("&Save", () {}, keys: "Ctrl+S");
-    string tall = "Tooltips wrap past their maximum width. This one is long enough to show it, and it stays "
-        ~ "inside the window near the edges.";
+    string tall = "Tooltips wrap past their maximum width. This one is long enough to show it. Near the "
+        ~ "window edges it reaches past them in a popup window of its own.";
     return column(gap: 22)(
         section("On buttons", line(
             button("Plain", tooltip: "A short tooltip"),

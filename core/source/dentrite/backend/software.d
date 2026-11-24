@@ -1,7 +1,7 @@
 /// CPU renderer: rasterizes a `FrameMesh` into RGBA8 pixels.
 ///
 /// Follows the GL backend: pixel centers at half pixels, the top-left fill rule, bilinear texture sampling with
-/// clamped edges, premultiplied blending in the framebuffer's gamma space and an opaque framebuffer. Custom draw
+/// clamped edges, premultiplied blending in the framebuffer's gamma space, alpha included. Custom draw
 /// batches are skipped. NOTE: channels can differ from GL's by a level where colors are interpolated.
 module dentrite.backend.software;
 
@@ -37,7 +37,7 @@ final class SoftwareRenderer : Renderer
         {
             pixels = new uint[cast(size_t) width * height];
         }
-        pixels[] = clear.r | clear.g << 8 | clear.b << 16 | 0xff000000;
+        pixels[] = clear.r | clear.g << 8 | clear.b << 16 | clear.a << 24;
         Texture glyphs = Texture(cast(const(uint)[]) atlas.pixels, atlas.width, atlas.height);
         PixelRect screen = PixelRect(0, 0, width, height);
         foreach (ref const Batch b; mesh.batches)
@@ -396,7 +396,7 @@ private void span(bool varyColor, bool varyUV, bool nearest)(uint[] row, ref con
         {
             float k = 1 - src[3] * (1 / 255.0f);
             d = to8(src[0] + (d & 0xff) * k) | to8(src[1] + ((d >> 8) & 0xff) * k) << 8
-                | to8(src[2] + ((d >> 16) & 0xff) * k) << 16 | 0xff000000;
+                | to8(src[2] + ((d >> 16) & 0xff) * k) << 16 | to8(src[3] + (d >> 24) * k) << 24;
         }
     }
 }

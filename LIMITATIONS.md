@@ -6,7 +6,14 @@ Known gaps, by area.
 
 - One window per process. The SDL3 platform reads every window's events and
   quits SDL when it closes.
-- Popups stay inside the window, no OS popup windows.
+- Popup windows: only run on X11. Without a compositor the shadow room
+  around them shows black. Each opens its own GL context, about 10 ms with
+  llvmpipe. Dialogs and other centered popups stay inside the window.
+  Screenshots hold the main window only.
+- Popup windows on Wayland: the window's place on screen is unknown, so
+  popups are placed as if it sat at its display's top left. The compositor
+  moves those that do not fit, and a press in the main window where the
+  popup would have been still reaches the popup.
 - File dialogs on Linux need an XDG portal or zenity, else they answer as
   cancelled.
 - A hidden window still draws the frames asked for, such as animations.

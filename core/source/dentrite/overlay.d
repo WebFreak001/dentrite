@@ -3,6 +3,8 @@
 /// The root of every tree is a `Stage` holding the app root, then the open popups from bottom to top, so
 /// paint order, hit testing and Tab order work as for any other children. Popups are placed after every
 /// layout, which keeps them next to an anchor that moved. `Host` asks the stage which input to block.
+/// A popup that does not fit in the window goes to an OS window of its own when `Stage.screen` allows, along with
+/// every popup above it, so OS windows stack in the same order. `Host` draws those and maps their input back.
 module dentrite.overlay;
 
 import dentrite.containers : CrossAlign;
@@ -24,6 +26,7 @@ struct PopupStyle
 {
     enum section = "popup"; /// section name in theme files
     Color scrim; /// fill over everything below a modal popup
+    float room = 16; /// space around a popup in a window of its own, for its shadow
 }
 
 /// Root of a tree: the app root, then the open popups from bottom to top.
@@ -31,6 +34,9 @@ final class Stage : Node
 {
     private Node app;      /// app root, or null
     private Popup[] stack; /// open popups, bottom first
+    /// Room popups may take in window coordinates, past the window edges when the host can give them OS windows.
+    /// Empty keeps them inside the window.
+    Rect screen;
 
     /// App root, or null.
     Node content()
@@ -85,6 +91,10 @@ final class Stage : Node
         foreach (Node c; children)
         {
             Popup p = cast(Popup) c;
+            if (p !is null && p.windowed)
+            {
+                continue;
+            }
             if (p !is null && p.modal)
             {
                 PopupStyle s = ctx.style!PopupStyle();
@@ -100,6 +110,7 @@ final class Stage : Node
     /// Lays out and positions every popup. Popups whose anchor left the tree close.
     void place()
     {
+        bool below;
         foreach (Popup p; stack.dup)
         {
             if (p.parent !is this)
@@ -111,19 +122,23 @@ final class Stage : Node
                 p.close();
                 continue;
             }
-            placeOne(p);
+            placeOne(p, below);
+            below = below || p.windowed;
         }
     }
 
-    /// Lays out `p` in the room next to its anchor and moves it to the side that fits.
-    private void placeOne(Popup p)
+    /// Lays out `p` in the room next to its anchor and moves it to the side that fits. It gets a window of its own
+    /// if it ends up past the window edges or a popup `below` it has one.
+    private void placeOne(Popup p, bool below)
     {
-        Size vp = size;
+        Rect window = Rect(0, 0, size.w, size.h);
         bool centered = p.atPoint == false && p.anchor is null;
+        bool roomy = centered == false && screen.empty == false;
+        Rect vp = roomy ? screen : window;
         Rect a = p.atPoint ? p.at : centered ? Rect.init : p.anchor.bounds;
         bool vertical = p.side == Side.below || p.side == Side.above;
-        float after = vertical ? vp.h - a.bottom - p.gap : vp.w - a.right - p.gap;
-        float before = vertical ? a.y - p.gap : a.x - p.gap;
+        float after = vertical ? vp.bottom - a.bottom - p.gap : vp.right - a.right - p.gap;
+        float before = vertical ? a.y - vp.y - p.gap : a.x - vp.x - p.gap;
         Constraints c = Constraints(0, vp.w, 0, vp.h);
         if (centered == false)
         {
@@ -143,7 +158,7 @@ final class Stage : Node
         Point o;
         if (centered)
         {
-            o = Point((vp.w - s.w) / 2, (vp.h - s.h) / 2);
+            o = Point(vp.x + (vp.w - s.w) / 2, vp.y + (vp.h - s.h) / 2);
         }
         else
         {
@@ -161,15 +176,36 @@ final class Stage : Node
                 o.y = along(a.y, a.h, s.h, p.align_);
             }
         }
-        o.x = clamp(o.x, 0, max(0f, vp.w - s.w));
-        o.y = clamp(o.y, 0, max(0f, vp.h - s.h));
+        o.x = clamp(o.x, vp.x, max(vp.x, vp.right - s.w));
+        o.y = clamp(o.y, vp.y, max(vp.y, vp.bottom - s.h));
         float ppp = tree.ppp;
         o = Point(round(o.x * ppp) / ppp, round(o.y * ppp) / ppp);
-        if (o != p.offset)
+        bool inside = o.x >= 0 && o.y >= 0 && o.x + s.w <= window.w && o.y + s.h <= window.h;
+        bool own = roomy && (below || inside == false);
+        if (o != p.offset || own != p.inWindow)
         {
             p.offset = o;
+            p.inWindow = own;
             markNeedsPaint();
         }
+    }
+
+    /// Deepest node under `p`. Popups in windows of their own count past the window edges.
+    override Node hitTest(Point p, Point origin)
+    {
+        bool inside = Rect(origin.x, origin.y, size.w, size.h).contains(p);
+        foreach_reverse (Node c; children)
+        {
+            Popup pp = cast(Popup) c;
+            if (inside || (pp !is null && pp.windowed))
+            {
+                if (Node hit = c.hitTest(p, origin + c.offset))
+                {
+                    return hit;
+                }
+            }
+        }
+        return inside ? this : null;
     }
 
     /// Puts `p` on top and moves focus into it if it asks.
@@ -215,6 +251,7 @@ final class Stage : Node
         }
         p.restore = null;
         p.atPoint = false;
+        p.inWindow = false;
         removeChild(p);
         markNeedsPaint();
         if (p.onClose !is null)
@@ -374,10 +411,12 @@ final class Popup : Node
     private Node restore; /// focus before opening
     private Rect at;      /// rectangle given to `openAt`
     private bool atPoint; /// `at` replaces the anchor until closed
+    private bool inWindow; /// shown in an OS window of its own, set by `Stage.place`
 
     /// Creates a closed popup around `content`.
     this(Node content)
     {
+        repaintBoundary = true;
         add(content);
     }
 
@@ -385,6 +424,12 @@ final class Popup : Node
     bool isOpen()
     {
         return parent !is null;
+    }
+
+    /// True while shown in an OS window of its own, see `WindowOptions.popupWindows`.
+    bool windowed() const
+    {
+        return inWindow;
     }
 
     /// Opens on top of the popups of `t`. Does nothing if already open.
@@ -639,6 +684,43 @@ unittest
     at.setChildren([new Fixed(Size(1, 1))]);
     t.flush();
     assert(closed == ["upper", "lower"] && t.root.children.length == 1);
+}
+
+// With room past the window, a popup that does not fit keeps its side and gets a window, as do the popups above
+// it. One that fits and a centered one stay inside, and hit tests reach a windowed popup past the window edges.
+unittest
+{
+    Fixed anchor = new Fixed(Size(40, 20));
+    At at = new At(anchor, Point(250, 170));
+    Tree t = bareTree(at, Size(300, 200));
+    t.root.screen = Rect(-100, -100, 600, 500);
+    Fixed box = new Fixed(Size(80, 50));
+    Popup p = popup(anchor: anchor)(box);
+    p.open();
+    t.flush();
+    assert(p.bounds == Rect(250, 190, 80, 50) && p.windowed, "below, past the window");
+    assert(t.root.hitTest(Point(320, 230), Point(0, 0)) is box);
+    assert(t.root.hitTest(Point(320, 300), Point(0, 0)) is null);
+
+    Popup sub = popup(anchor: anchor, side: Side.above)(new Fixed(Size(10, 10)));
+    sub.open();
+    Popup dialog = popup()(new Fixed(Size(10, 10)));
+    dialog.open(t);
+    t.flush();
+    assert(sub.bounds == Rect(250, 160, 10, 10) && sub.windowed, "above a windowed popup");
+    assert(dialog.windowed == false, "centered");
+
+    sub.close();
+    at.pos = Point(10, 10);
+    at.markNeedsLayout();
+    t.flush();
+    assert(p.bounds == Rect(10, 30, 80, 50) && p.windowed == false, "fits");
+
+    t.root.screen = Rect.init;
+    at.pos = Point(250, 170);
+    at.markNeedsLayout();
+    t.flush();
+    assert(p.bounds == Rect(220, 120, 80, 50) && p.windowed == false, "flipped inside without room");
 }
 
 // A boundary inside a closed popup that changed while detached is laid out again when it reopens.

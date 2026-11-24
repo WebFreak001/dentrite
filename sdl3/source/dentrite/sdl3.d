@@ -13,11 +13,15 @@ import dentrite.backend.software : SoftwareRenderer;
 import dentrite.c.gl : GL_RENDERER, GL_VERSION, glGetString, loadGL;
 import dentrite.c.sdl;
 import dentrite.deadkeys : DeadKeys;
+import dentrite.draw : FrameMesh;
 import dentrite.geom;
 import dentrite.image : Image;
 import dentrite.node : CursorShape, Mod, PointerKind;
 import dentrite.platform;
+import dentrite.text : GlyphAtlas;
+import std.math : ceil;
 import std.algorithm.comparison : max, min;
+import std.algorithm.mutation : remove;
 import std.exception : enforce;
 import std.process : environment;
 import std.stdio : stderr;
@@ -248,8 +252,93 @@ private extern (C) void fileAnswered(void* userdata, const(char*)* list, int fil
     SDL_PushEvent(&e);
 }
 
+/// Popup window of an `SdlPlatform`, transparent, drawn with a GL context or a software renderer of its own.
+/// NOTE: X11 cannot draw a transparent window with the main window's context, so each popup has one.
+private final class SdlPopup : PopupWindow
+{
+    SdlPlatform platform;     /// owner
+    SDL_Window* win;          /// SDL window, null once closed
+    SdlPopup parent;          /// window it sits above, null for the main window
+    Rect at;                  /// rectangle in physical pixels from the main window's top left
+    uint number;              /// SDL window id
+    SDL_GLContext gl;         /// own GL context, null in software
+    Renderer renderer;        /// draws its frames
+    bool shown;               /// shown, which waits for the first frame
+
+    /// SDL window id.
+    uint id()
+    {
+        return number;
+    }
+
+    /// Moves and resizes the window to `r`.
+    void move(Rect r)
+    {
+        if (win is null)
+        {
+            return;
+        }
+        at = r;
+        SDL_Rect w = platform.popupRect(r, parent);
+        SDL_SetWindowPosition(win, w.x, w.y);
+        SDL_SetWindowSize(win, w.w, w.h);
+    }
+
+    /// Clears to transparent, draws `mesh`, shows the window if new and presents.
+    void draw(FrameMesh mesh, GlyphAtlas atlas)
+    {
+        if (win is null)
+        {
+            return;
+        }
+        if (shown == false)
+        {
+            shown = true;
+            SDL_ShowWindow(win);
+        }
+        if (gl !is null)
+        {
+            SDL_GL_MakeCurrent(win, gl);
+            renderer.render(mesh, atlas, Color(0, 0, 0, 0));
+            SDL_GL_SwapWindow(win);
+            SDL_GL_MakeCurrent(platform.win, platform.gl);
+            return;
+        }
+        renderer.render(mesh, atlas, Color(0, 0, 0, 0));
+        SoftwareRenderer soft = cast(SoftwareRenderer) renderer;
+        SdlPlatform.blit(win, soft);
+    }
+
+    /// Closes the popups above it, frees its renderer and destroys the window. Safe to call twice.
+    void close()
+    {
+        if (win is null)
+        {
+            return;
+        }
+        foreach_reverse (SdlPopup p; platform.popups)
+        {
+            if (p.parent is this)
+            {
+                p.close();
+            }
+        }
+        if (gl !is null)
+        {
+            SDL_GL_MakeCurrent(win, gl);
+            renderer.dispose();
+            SDL_GL_DestroyContext(gl);
+            SDL_GL_MakeCurrent(platform.win, platform.gl);
+            gl = null;
+        }
+        SDL_DestroyWindow(win);
+        win = null;
+        platform.popups = platform.popups.remove!(p => p is this);
+    }
+}
+
 /// SDL3 window with a GL 3.3 context or a software surface.
-final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl, Trays
+final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl, Trays, PopupWindows
 {
     Renderer renderer;              /// renderer drawing into this window, created along with it
     /// Called with every SDL event on the UI thread, before the library handles it.
@@ -272,6 +361,7 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl, T
     private bool hasQueued;         /// `queued` is waiting
     private float forced = 0;       /// `WindowOptions.scale`, 0 for the display's own
     private SdlTray[] trays;        /// tray icons open
+    private SdlPopup[] popups;      /// popup windows open, parents before their children
 
     /// Opens the window and sets up the renderer `o.renderer` names.
     this(WindowOptions o)
@@ -593,6 +683,23 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl, T
         return true;
     }
 
+    /// SDL id of the window that window or pointer event `s` came from, 0 for other events.
+    private static uint windowOf(ref const SDL_Event s)
+    {
+        switch (s.type)
+        {
+        case SDL_EventType.mouseMotion:
+            return s.motion.windowID;
+        case SDL_EventType.mouseButtonDown:
+        case SDL_EventType.mouseButtonUp:
+            return s.button.windowID;
+        case SDL_EventType.mouseWheel:
+            return s.wheel.windowID;
+        default:
+            return s.type >= 0x200 && s.type < 0x300 ? s.window.windowID : 0;
+        }
+    }
+
     /// Event for SDL event `s`.
     private Event translate(ref SDL_Event s)
     {
@@ -601,20 +708,33 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl, T
         {
             logEvent(s);
         }
+        SdlPopup from = popupOf(windowOf(s));
+        if (from !is null)
+        {
+            e.surface = from.number;
+        }
         switch (s.type)
         {
         case SDL_EventType.quit:
             e.kind = EventKind.quit;
             break;
         case SDL_EventType.windowCloseRequested:
-            e.kind = EventKind.close;
+            e.kind = from is null ? EventKind.close : EventKind.none;
             break;
         case SDL_EventType.windowMoved:
         case SDL_EventType.windowShown:
+            if (from !is null)
+            {
+                break;
+            }
+            e.kind = EventKind.resized; // the popup area moved with it
             if (access !is null)
             {
                 access.windowMoved(win);
             }
+            break;
+        case SDL_EventType.windowHidden:
+            e.kind = from is null ? EventKind.none : EventKind.dismissed;
             break;
         case SDL_EventType.windowFocusGained:
             if (access !is null)
@@ -625,6 +745,10 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl, T
         case SDL_EventType.windowResized:
         case SDL_EventType.windowPixelSizeChanged:
         case SDL_EventType.windowDisplayScaleChanged:
+            if (from !is null)
+            {
+                break;
+            }
             readSizes();
             e.kind = EventKind.resized;
             if (access !is null)
@@ -639,6 +763,10 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl, T
             e.kind = EventKind.pointerLeft;
             break;
         case SDL_EventType.windowFocusLost:
+            if (ours(SDL_GetKeyboardFocus()))
+            {
+                break; // moved between the window and its popups
+            }
             e.kind = EventKind.focusLost;
             deadShown = false;
             if (access !is null)
@@ -789,20 +917,121 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl, T
             SDL_GL_SwapWindow(win);
             return;
         }
-        SDL_Surface* dst = SDL_GetWindowSurface(win);
-        if (dst is null || soft.pixels.length == 0)
+        blit(win, soft);
+    }
+
+    /// Copies the last frame of `r` to the surface of `w`, alpha included, and presents it.
+    private static void blit(SDL_Window* w, SoftwareRenderer r)
+    {
+        SDL_Surface* dst = SDL_GetWindowSurface(w);
+        if (dst is null || r.pixels.length == 0)
         {
             return;
         }
-        SDL_Surface* src = SDL_CreateSurfaceFrom(soft.width, soft.height, SDL_PIXELFORMAT_ABGR8888,
-            soft.pixels.ptr, soft.width * 4);
+        SDL_Surface* src = SDL_CreateSurfaceFrom(r.width, r.height, SDL_PIXELFORMAT_ABGR8888, r.pixels.ptr,
+            r.width * 4);
         if (src is null)
         {
             return;
         }
+        SDL_SetSurfaceBlendMode(src, 0);
         SDL_BlitSurface(src, null, dst, null);
         SDL_DestroySurface(src);
-        SDL_UpdateWindowSurface(win);
+        SDL_UpdateWindowSurface(w);
+    }
+
+    /// Display work area in physical pixels from the window's top left, empty if SDL does not know it.
+    /// NOTE: on Wayland the window position reads as 0, 0, so the area is a guess the compositor corrects.
+    Rect popupArea()
+    {
+        SDL_Rect u;
+        uint d = SDL_GetDisplayForWindow(win);
+        if (d == 0 || SDL_GetDisplayUsableBounds(d, &u) == false)
+        {
+            return Rect.init;
+        }
+        int x;
+        int y;
+        SDL_GetWindowPosition(win, &x, &y);
+        Point from = toPixels(u.x - x, u.y - y);
+        Point size = toPixels(u.w, u.h);
+        return Rect(from.x, from.y, size.x, size.y);
+    }
+
+    /// Opens a hidden popup window at `r` above `parent`, shown by its first frame. A menu when `input`, else a
+    /// tooltip. Null if SDL or GL failed.
+    PopupWindow openPopup(PopupWindow parent, Rect r, bool input)
+    {
+        SdlPopup up = cast(SdlPopup) parent;
+        SDL_Rect w = popupRect(r, up);
+        ulong flags = (input ? SDL_WINDOW_POPUP_MENU : SDL_WINDOW_TOOLTIP) | SDL_WINDOW_TRANSPARENT | SDL_WINDOW_HIDDEN
+            | (gl is null ? 0 : SDL_WINDOW_OPENGL) | (forced > 0 ? 0 : SDL_WINDOW_HIGH_PIXEL_DENSITY);
+        SDL_Window* made = SDL_CreatePopupWindow(up is null ? win : up.win, w.x, w.y, w.w, w.h, flags);
+        if (made is null)
+        {
+            stderr.writeln("dentrite: SDL_CreatePopupWindow: ", error());
+            return null;
+        }
+        SdlPopup p = new SdlPopup;
+        p.platform = this;
+        p.win = made;
+        p.parent = up;
+        p.at = r;
+        p.number = SDL_GetWindowID(made);
+        if (gl is null)
+        {
+            p.renderer = new SoftwareRenderer;
+            SDL_GetWindowSurface(made); // NOTE: may recreate the window, which would read as a dismissal once shown
+        }
+        else
+        {
+            p.gl = SDL_GL_CreateContext(made);
+            if (p.gl is null)
+            {
+                stderr.writeln("dentrite: popup GL context: ", error());
+                SDL_DestroyWindow(made);
+                SDL_GL_MakeCurrent(win, gl);
+                return null;
+            }
+            SDL_GL_SetSwapInterval(0);
+            p.renderer = new GL33Renderer;
+            SDL_GL_MakeCurrent(win, gl);
+        }
+        if (textOn)
+        {
+            SDL_StartTextInput(made);
+        }
+        popups ~= p;
+        return p;
+    }
+
+    /// Window rectangle for physical pixels `r` from the main window's top left, relative to `parent`, or to the
+    /// main window if null.
+    private SDL_Rect popupRect(Rect r, SdlPopup parent)
+    {
+        float k = pixelW > 0 ? cast(float) windowW / pixelW : 1;
+        Point o = parent is null ? Point(0, 0) : parent.at.pos;
+        return SDL_Rect(cast(int)((r.x - o.x) * k), cast(int)((r.y - o.y) * k), cast(int) ceil(r.w * k),
+            cast(int) ceil(r.h * k));
+    }
+
+    /// Popup window with SDL id `id`, or null.
+    private SdlPopup popupOf(uint id)
+    {
+        foreach (SdlPopup p; popups)
+        {
+            if (p.number == id)
+            {
+                return p;
+            }
+        }
+        return null;
+    }
+
+    /// True if `w` is the main window or one of its popups.
+    private bool ours(SDL_Window* w)
+    {
+        return w !is null && (w is win || popupOf(SDL_GetWindowID(w)) !is null);
     }
 
     /// Shows the stock cursor for `shape`.
@@ -876,28 +1105,47 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl, T
         });
     }
 
-    /// Starts or stops SDL text events.
+    /// Starts or stops SDL text events, on the popup windows too, as the topmost popup menu takes keyboard focus.
     void textInput(bool on)
     {
         textOn = on;
         deadShown = false;
-        if (on)
+        foreach (SDL_Window* w; [win] ~ popupWindows())
         {
-            SDL_StartTextInput(win);
-        }
-        else
-        {
-            SDL_StopTextInput(win);
+            if (on)
+            {
+                SDL_StartTextInput(w);
+            }
+            else
+            {
+                SDL_StopTextInput(w);
+            }
         }
     }
 
-    /// Tells the input method where the caret is, given in physical pixels.
+    /// Tells the input method where the caret is, given in physical pixels, on the popup windows too.
     void textInputArea(Rect caret)
     {
         float k = pixelW > 0 ? cast(float) windowW / pixelW : 1;
         SDL_Rect r = SDL_Rect(cast(int)(caret.x * k), cast(int)(caret.y * k), max(1, cast(int)(caret.w * k)),
             max(1, cast(int)(caret.h * k)));
         SDL_SetTextInputArea(win, &r, 0);
+        foreach (SdlPopup p; popups)
+        {
+            SDL_Rect pr = SDL_Rect(r.x - cast(int)(p.at.x * k), r.y - cast(int)(p.at.y * k), r.w, r.h);
+            SDL_SetTextInputArea(p.win, &pr, 0);
+        }
+    }
+
+    /// SDL windows of the open popups.
+    private SDL_Window*[] popupWindows()
+    {
+        SDL_Window*[] list;
+        foreach (SdlPopup p; popups)
+        {
+            list ~= p.win;
+        }
+        return list;
     }
 
     /// Clipboard text.
@@ -936,6 +1184,10 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl, T
         foreach (SdlTray t; trays.dup)
         {
             t.close();
+        }
+        foreach_reverse (SdlPopup p; popups.dup)
+        {
+            p.close();
         }
         if (deadKeys !is null)
         {

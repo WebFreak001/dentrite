@@ -180,9 +180,8 @@ final class GlyphAtlas
     int width;            /// width in texels
     int height;           /// height in texels
     ubyte[] pixels;       /// premultiplied RGBA8 rows, top first
-    int dirtyTop = int.max; /// first changed row since `takeDirty`
-    int dirtyBottom;      /// one past the last changed row
-    bool resized = true;  /// size changed, upload everything
+    int dirtyTop = int.max; /// first row changed this frame, see `endFrame`
+    int dirtyBottom;      /// one past the last row changed this frame
     bool full;            /// true when out of space, cleared before the next frame
     uint generation;      /// bumped by `clear`, meshes made before hold stale texel coordinates
     enum int maxHeight = 4096; /// tallest the atlas grows, in texels
@@ -215,7 +214,6 @@ final class GlyphAtlas
         shelfY = 0;
         shelfH = 5;
         full = false;
-        resized = true;
         dirtyTop = 0;
         dirtyBottom = height;
     }
@@ -310,14 +308,18 @@ final class GlyphAtlas
     {
         height *= 2;
         pixels.length = width * height * 4;
-        resized = true;
     }
 
-    /// Rows changed since the last call as `[top, bottom)`, then resets. Empty when clean.
-    void takeDirty(out int top, out int bottom)
+    /// Rows changed this frame as `[top, bottom)`, empty when clean. Every renderer drawing this frame reads them.
+    void dirtyRows(out int top, out int bottom) const
     {
         top = dirtyTop == int.max ? 0 : dirtyTop;
         bottom = dirtyTop == int.max ? 0 : dirtyBottom;
+    }
+
+    /// Starts a frame with no changed rows, once every renderer drew.
+    void endFrame()
+    {
         dirtyTop = int.max;
         dirtyBottom = 0;
     }
@@ -714,10 +716,12 @@ final class TextSystem
             cast(int) round(g.bitmap_top * f.strikeScale));
     }
 
-    /// Ends a frame: clears a full atlas and drops runs unused for `keep` frames.
+    /// Ends a frame once every renderer drew: resets the changed atlas rows, clears a full atlas and drops runs
+    /// unused for `keep` frames.
     void endFrame(ulong keep = 600)
     {
         ++frame;
+        atlas.endFrame();
         if (atlas.full)
         {
             atlas.clear();
@@ -1013,6 +1017,17 @@ unittest
     assert(small.height > 64 && small.full == false);
     assert(*small.find(GlyphKey(0, 1, 0)) == keep);
     assert(small.pixels[(keep.y * small.width + keep.x) * 4] == 255);
+    int top;
+    int bottom;
+    small.endFrame();
+    small.place(GlyphKey(0, 50, 0), 10, 10, 10, ink.ptr, 0, 0, identity);
+    small.dirtyRows(top, bottom);
+    int again;
+    small.dirtyRows(again, bottom);
+    assert(top > 0 && again == top && bottom == top + 10, "rows stay for every renderer of the frame");
+    small.endFrame();
+    small.dirtyRows(top, bottom);
+    assert(top == bottom);
     int pen;
     assert(subpixel(10.3, pen) == 1 && pen == 10);
     assert(subpixel(10.9, pen) == 0 && pen == 11);

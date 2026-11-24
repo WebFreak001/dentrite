@@ -4,13 +4,15 @@ module dentrite.headless;
 import core.sync.semaphore : Semaphore;
 import core.time : Duration;
 import dentrite.access : AccessAdapter, AccessDemand, AccessUpdate;
+import dentrite.draw : FrameMesh;
 import dentrite.geom : Rect;
 import dentrite.image : Image;
 import dentrite.node : CursorShape;
 import dentrite.platform;
+import dentrite.text : GlyphAtlas;
 
 /// Fixed size framebuffer with events queued by the app.
-final class HeadlessPlatform : Platform, FileDialogs, AccessAdapter, WindowControl, Trays
+final class HeadlessPlatform : Platform, FileDialogs, AccessAdapter, WindowControl, Trays, PopupWindows
 {
     Metrics size;        /// framebuffer size and scale
     Event[] queue;       /// events `wait` hands out, oldest first
@@ -29,6 +31,8 @@ final class HeadlessPlatform : Platform, FileDialogs, AccessAdapter, WindowContr
     Image icon;          /// last icon set
     HeadlessTray[] trays; /// tray icons opened, closed ones included
     bool trayless;       /// true to answer `openTray` with null, as without a system tray
+    Rect screen;         /// what `popupArea` answers, empty for no popup windows
+    HeadlessPopup[] popups; /// popup windows opened, closed ones included
 
     /// Platform `w` by `h` logical pixels at `scale`.
     this(int w, int h, float scale = 1)
@@ -144,6 +148,24 @@ final class HeadlessPlatform : Platform, FileDialogs, AccessAdapter, WindowContr
         return t;
     }
 
+    /// `screen`.
+    Rect popupArea()
+    {
+        return screen;
+    }
+
+    /// Records a popup window.
+    PopupWindow openPopup(PopupWindow parent, Rect r, bool input)
+    {
+        HeadlessPopup w = new HeadlessPopup;
+        w.number = cast(uint) popups.length + 1;
+        w.parent = cast(HeadlessPopup) parent;
+        w.at = r;
+        w.input = input;
+        popups ~= w;
+        return w;
+    }
+
     /// Counts the frame.
     void present()
     {
@@ -225,6 +247,44 @@ final class HeadlessTray : TrayIcon
         entries[index].label = e.label;
         entries[index].enabled = e.enabled;
         entries[index].checked = e.checked;
+    }
+
+    /// Marks it closed.
+    void close()
+    {
+        closed = true;
+    }
+}
+
+/// Popup window recorded by `HeadlessPlatform`.
+final class HeadlessPopup : PopupWindow
+{
+    HeadlessPopup parent; /// window it opened above, null for the main window
+    Rect at;              /// last rectangle, in physical pixels from the main window's top left
+    bool input;           /// takes pointer input
+    int drawn;            /// frames drawn
+    size_t batches;       /// draw batches of the last frame
+    bool closed;          /// true once closed
+
+    private uint number;  /// `id`
+
+    /// Number in `Event.surface`, counting from 1.
+    uint id()
+    {
+        return number;
+    }
+
+    /// Records the rectangle.
+    void move(Rect r)
+    {
+        at = r;
+    }
+
+    /// Counts the frame.
+    void draw(FrameMesh mesh, GlyphAtlas atlas)
+    {
+        ++drawn;
+        batches = mesh.batches.length;
     }
 
     /// Marks it closed.

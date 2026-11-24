@@ -45,6 +45,9 @@ enum ulong SDL_WINDOW_HIDDEN = 0x8;                /// not shown until `SDL_Show
 enum ulong SDL_WINDOW_RESIZABLE = 0x20;            /// user resizable
 enum ulong SDL_WINDOW_MINIMIZED = 0x40;            /// minimized
 enum ulong SDL_WINDOW_HIGH_PIXEL_DENSITY = 0x2000; /// full resolution back buffer on HiDPI
+enum ulong SDL_WINDOW_TOOLTIP = 0x40000;           /// popup without input, needs a parent
+enum ulong SDL_WINDOW_POPUP_MENU = 0x80000;        /// popup taking keyboard focus while topmost, needs a parent
+enum ulong SDL_WINDOW_TRANSPARENT = 0x40000000;    /// framebuffer alpha shows what is below
 
 /// GL context attributes, in header order.
 enum SDL_GLAttr : int
@@ -62,6 +65,7 @@ enum SDL_EventType : uint
 {
     quit = 0x100,
     windowShown = 0x202,
+    windowHidden = 0x203,
     windowExposed = 0x204,
     windowMoved = 0x205,
     windowResized = 0x206,
@@ -272,6 +276,14 @@ bool SDL_SetWindowIcon(SDL_Window* window, SDL_Surface* icon);  /// window icon,
 bool SDL_GetWindowSize(SDL_Window* window, int* w, int* h);         /// size in window coordinates
 bool SDL_GetWindowSizeInPixels(SDL_Window* window, int* w, int* h); /// size in pixels
 bool SDL_GetWindowPosition(SDL_Window* window, int* x, int* y);     /// position in screen coordinates
+bool SDL_SetWindowPosition(SDL_Window* window, int x, int y);       /// moves, popups relative to their parent
+bool SDL_SetWindowSize(SDL_Window* window, int w, int h);           /// resizes, in window coordinates
+/// Popup window above `parent`, at `x`, `y` from its top left. Flags need `SDL_WINDOW_TOOLTIP` or
+/// `SDL_WINDOW_POPUP_MENU`.
+SDL_Window* SDL_CreatePopupWindow(SDL_Window* parent, int x, int y, int w, int h, ulong flags);
+SDL_Window* SDL_GetKeyboardFocus();                     /// window with keyboard focus, or null
+uint SDL_GetDisplayForWindow(SDL_Window* window);       /// display holding most of the window, 0 on failure
+bool SDL_GetDisplayUsableBounds(uint displayID, SDL_Rect* rect); /// display area minus panels, screen coordinates
 /// Size of the decorations around the window.
 bool SDL_GetWindowBordersSize(SDL_Window* window, int* top, int* left, int* bottom, int* right);
 float SDL_GetWindowDisplayScale(SDL_Window* window);    /// pixel density times content scale
@@ -292,6 +304,7 @@ bool SDL_UpdateWindowSurface(SDL_Window* window);       /// presents the window 
 bool SDL_SetWindowSurfaceVSync(SDL_Window* window, int vsync); /// 1 for vsync on surface updates
 SDL_Surface* SDL_CreateSurfaceFrom(int w, int h, uint format, void* pixels, int pitch); /// wraps pixels
 void SDL_DestroySurface(SDL_Surface* surface);          /// frees a surface, not wrapped pixels
+bool SDL_SetSurfaceBlendMode(SDL_Surface* surface, uint mode); /// how blits from it blend, 0 copies
 /// Copies `src` into `dst` with format conversion, null rects for whole surfaces.
 bool SDL_BlitSurface(SDL_Surface* src, const(SDL_Rect)* srcRect, SDL_Surface* dst, const(SDL_Rect)* dstRect);
 

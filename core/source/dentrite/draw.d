@@ -1032,8 +1032,9 @@ struct Compositor
     size_t vertices;       /// vertices of the layers drawn in the last compose
     size_t meshBytes;      /// vertex and index bytes of those layers
 
-    /// Composes `root` and the layers it refers to into `m` for a `width` by `height` framebuffer.
-    void compose(Layer root, FrameMesh m, int width, int height)
+    /// Composes `root` and the layers it refers to into `m` for a `width` by `height` framebuffer, with the
+    /// node of `root` at logical `origin`.
+    void compose(Layer root, FrameMesh m, int width, int height, Point origin = Point(0, 0))
     {
         m.clear();
         m.width = width;
@@ -1045,7 +1046,7 @@ struct Compositor
         meshBytes = 0;
         painting = Duration.zero;
         tessellating = Duration.zero;
-        place(root, Point(0, 0), PixelRect(0, 0, width, height), m);
+        place(root, origin, PixelRect(0, 0, width, height), m);
     }
 
     /// Appends layer `l`, now at logical `origin` under `scissor`, after recording it if stale or moved by a

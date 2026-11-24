@@ -46,6 +46,9 @@ struct WindowOptions
     /// Exposes the UI to screen readers, see `dentrite.access`. The SDL3 platform loads AccessKit for it at run
     /// time and goes on without it if missing.
     bool accessibility;
+    /// Shows a popup that would not fit in the window in an OS window of its own, when the platform can. Hidden
+    /// windows keep popups inside.
+    bool popupWindows = true;
 }
 
 /// Framebuffer size and display density, from `Platform.metrics`.
@@ -74,6 +77,7 @@ enum EventKind
     wake,        /// `wakeUi` from another thread
     call,        /// run `call` on the UI thread, such as a file dialog's handler
     access,      /// an assistive technology asks for `request`
+    dismissed,   /// the system closed popup window `surface`, such as on a press outside the app
 }
 
 /// Input or window event from a platform. A field doc starting with an event kind, such as `pointer:`, says which
@@ -81,8 +85,9 @@ enum EventKind
 struct Event
 {
     EventKind kind;      /// kind of event
+    uint surface;        /// popup window the event came from, see `PopupWindow.id`, 0 for the main window
     PointerKind pointer; /// `pointer`: move, down or up
-    Point pos;           /// `pointer` and `wheel`: position in physical pixels
+    Point pos;           /// `pointer` and `wheel`: position in physical pixels within `surface`
     ubyte button;        /// `pointer`: 1 left, 2 middle, 3 right
     ubyte clicks;        /// `pointer`: 2 for a double click
     ubyte mods;          /// `Mod` flags, combined with `|`
@@ -161,6 +166,27 @@ interface Trays
     TrayIcon openTray(Image icon, string tooltip, const(TrayEntry)[] menu, void delegate(size_t) pressed);
 }
 
+/// OS window showing one popup, from `PopupWindows.openPopup`. Rectangles are in physical pixels from the main
+/// window's top left.
+interface PopupWindow
+{
+    uint id();                                   /// `Event.surface` of the events from this window, not 0
+    void move(Rect r);                           /// moves and resizes the window to `r`
+    void draw(FrameMesh mesh, GlyphAtlas atlas); /// clears to transparent, draws `mesh` and presents
+    void close();                                /// destroys the window, safe to call twice
+}
+
+/// Platform that can show popups in OS windows of their own, so they reach past the main window.
+interface PopupWindows
+{
+    /// Room popups may take, such as the display's work area, in physical pixels from the main window's top
+    /// left. Empty for none.
+    Rect popupArea();
+    /// Opens a window at `r` above `parent`, or above the main window if null. `input` false lets the pointer
+    /// through and leaves keyboard focus alone, as for a tooltip. Null if it failed.
+    PopupWindow openPopup(PopupWindow parent, Rect r, bool input);
+}
+
 /// Window system side of a host: window, events, clipboard, cursor, presenting.
 interface Platform
 {
@@ -178,7 +204,7 @@ interface Platform
 /// Draws frames for a platform.
 interface Renderer
 {
-    void render(FrameMesh mesh, GlyphAtlas atlas, Color clear); /// clears to `clear` and draws `mesh`
+    void render(FrameMesh mesh, GlyphAtlas atlas, Color clear); /// clears to premultiplied `clear`, draws `mesh`
     ubyte[] readPixels();  /// last frame as RGBA8 rows, top row first
     string description();  /// renderer and driver, for logs
     void dispose();        /// frees what the renderer holds, before the platform closes

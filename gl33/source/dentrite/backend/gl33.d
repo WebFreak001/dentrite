@@ -172,7 +172,7 @@ final class GL33Renderer : Renderer
         return fromStringz(glGetString(GL_RENDERER)).idup ~ ", GL " ~ fromStringz(glGetString(GL_VERSION)).idup;
     }
 
-    /// Uploads atlas changes since the last frame.
+    /// Uploads the atlas rows changed this frame, or all of it when new or resized.
     private void upload(GlyphAtlas atlas)
     {
         glBindTexture(GL_TEXTURE_2D, atlasTex);
@@ -180,14 +180,13 @@ final class GL33Renderer : Renderer
         glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
         int top;
         int bottom;
-        atlas.takeDirty(top, bottom);
-        if (atlas.resized || texW != atlas.width || texH != atlas.height)
+        atlas.dirtyRows(top, bottom);
+        if (texW != atlas.width || texH != atlas.height)
         {
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, atlas.width, atlas.height, 0, GL_RGBA, GL_UNSIGNED_BYTE,
                 atlas.pixels.ptr);
             texW = atlas.width;
             texH = atlas.height;
-            atlas.resized = false;
             return;
         }
         if (bottom > top)
@@ -229,7 +228,7 @@ final class GL33Renderer : Renderer
         frameH = h;
         upload(atlas);
         glDisable(GL_SCISSOR_TEST);
-        glClearColor(clear.r / 255.0f, clear.g / 255.0f, clear.b / 255.0f, 1);
+        glClearColor(clear.r / 255.0f, clear.g / 255.0f, clear.b / 255.0f, clear.a / 255.0f);
         glClear(GL_COLOR_BUFFER_BIT);
         bindState(w, h);
         foreach (ref Batch b; mesh.batches)

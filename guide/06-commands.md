@@ -88,6 +88,11 @@ passes on the rest.
 - `contextMenu(items...)(content)` opens on a right click in `content`, or
   Shift+F10 and the menu key while it has focus.
 
+A menu, combo box list or tooltip that does not fit in the window opens in
+a popup window of its own, past the window edges, along with the popups
+above it. `WindowOptions.popupWindows = false` keeps them inside, as does a
+hidden window.
+
 ## Dialogs
 
 `dialog(title, buttons:, primary:, primaryVariant:, width:, onClose:)(content)`
