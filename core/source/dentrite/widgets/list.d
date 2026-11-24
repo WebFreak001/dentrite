@@ -1740,6 +1740,34 @@ unittest
     assert(sv.scrollY == 310);
 }
 
+// Following the top shows rows added above while scrolled to the top, and keeps the top row once scrolled away.
+unittest
+{
+    import std.array : array;
+    import std.range : iota;
+
+    Signal!(int[]) items = signal(iota(50).array);
+    int runs;
+    VirtualList!(int, int) list = virtualList!(int, int)(&items.get, (int i) => i,
+        (int delegate() item) => probeRow(item, &runs, (int i) => false));
+    ScrollView sv = scroll(followTop: true)(list);
+    Tree t = bareTree(sv, Size(50, 100));
+    t.flush();
+    items.set(iota(-10, 0).array ~ items.peek);
+    t.flush();
+    assert(sv.scrollY == 0 && list[-10] !is null && list[-10].bounds.y == 0);
+    sv.scrollTo(50);
+    t.flush();
+    items.set(iota(-15, -10).array ~ items.peek);
+    t.flush();
+    assert(sv.scrollY == 100, "row -5 stays at the top of the view");
+    items.set(iota(5).array);
+    t.flush();
+    items.set(iota(-20, 0).array ~ items.peek);
+    t.flush();
+    assert(sv.scrollY == 0, "shrinking to fit moved the view to the top, so it follows the top again");
+}
+
 // Sibling rows are one Tab stop at the selected row, and arrows click the next enabled row without wrapping.
 unittest
 {

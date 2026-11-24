@@ -815,14 +815,17 @@ final class ScrollView : Node
 {
     float scrollY = 0;  /// distance scrolled from the top, in logical pixels
     bool follow;        /// true to keep showing the end while scrolled to it, for logs
+    bool followTop;     /// true to keep showing the top while scrolled to it, for newest-first feeds
     private bool dragging;  /// thumb is being dragged
     private float grabY;    /// pointer y minus thumb top at grab
     private bool atBottom = true; /// was at the bottom before the last layout
+    private bool atTop = true;    /// was at the top before the last layout
 
     /// Wraps `child`.
-    this(Node child, bool follow)
+    this(Node child, bool follow, bool followTop = false)
     {
         this.follow = follow;
+        this.followTop = followTop;
         add(child);
         interactive = true;
     }
@@ -852,18 +855,22 @@ final class ScrollView : Node
             float shown = scrollY;
             if (va !is null)
             {
-                scrollY += va.takeShift();
+                scrollY += keptShift(va);
                 shown = scrollY;
                 va.viewport(scrollY, own.h);
             }
             children[0].layout(cc);
             if (va !is null)
             {
-                scrollY += va.takeShift();
+                scrollY += keptShift(va);
             }
             if (follow && atBottom)
             {
                 scrollY = maxScroll;
+            }
+            if (followTop && atTop)
+            {
+                scrollY = 0;
             }
             scrollY = clamp(scrollY, 0, maxScroll);
             if (va is null || scrollY == shown)
@@ -871,8 +878,16 @@ final class ScrollView : Node
                 break;
             }
         }
+        atTop = scrollY <= 0.5f;
         children[0].offset = contentOffset();
         return own;
+    }
+
+    /// Shift from `va` to add to the scroll, 0 while following the top.
+    private float keptShift(ViewportAware va)
+    {
+        float shift = va.takeShift();
+        return followTop && atTop ? 0 : shift;
     }
 
     /// Child offset for the scroll distance, on whole physical pixels so the content's layers move without
@@ -889,6 +904,7 @@ final class ScrollView : Node
         float before = scrollY;
         scrollY = clamp(y, 0, maxScroll);
         atBottom = scrollY >= maxScroll - 0.5f;
+        atTop = scrollY <= 0.5f;
         children[0].offset = contentOffset();
         if (ViewportAware va = cast(ViewportAware) children[0])
         {
@@ -1046,25 +1062,27 @@ void scrollIntoView(Node n, Rect r)
 /// Scroll options, waiting for the child.
 struct ScrollSpec
 {
-    bool follow; /// true to keep showing the end while scrolled to it, for logs
+    bool follow;    /// true to keep showing the end while scrolled to it, for logs
+    bool followTop; /// true to keep showing the top while scrolled to it, for newest-first feeds
 
     /// Stores the options. Needed because `opCall` hides the struct literal.
-    this(bool follow)
+    this(bool follow, bool followTop)
     {
         this.follow = follow;
+        this.followTop = followTop;
     }
 
     /// The scroll view around `child`.
     ScrollView opCall(Node child)
     {
-        return new ScrollView(child, follow);
+        return new ScrollView(child, follow, followTop);
     }
 }
 
 /// Vertical scroll view: `scroll(follow: true)(child)`.
-ScrollSpec scroll(bool follow = false)
+ScrollSpec scroll(bool follow = false, bool followTop = false)
 {
-    return ScrollSpec(follow);
+    return ScrollSpec(follow, followTop);
 }
 
 // Panel skeleton from research/examples/layout.d, now with default cross alignments and spacers.

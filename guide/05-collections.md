@@ -114,6 +114,8 @@ Measured heights follow their keys when the items change. In a scroll view,
 the row at the top of the view stays in place when items are added or removed
 above it, such as older messages loaded at the top. `scroll(follow: true)`
 keeps showing the end while scrolled to it, for chats and logs.
+`scroll(followTop: true)` keeps showing the top while scrolled to it, for
+newest-first feeds.
 
 Only the rows in view are nodes, reused as the list scrolls, so a long feed
 costs its items and not its widgets. Cap the items in the app, such as keeping

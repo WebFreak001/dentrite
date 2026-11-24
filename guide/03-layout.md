@@ -20,7 +20,7 @@ All in `dentrite.containers`:
 | `sized(w:, h:)(child)` | Fixed width, height or both. A missing one is left to the parent. |
 | `panel(variant:)(child)` | Themed background, border and padding. |
 | `hrule()`, `vrule()` | One pixel separators. |
-| `scroll(follow:)(child)` | Vertical scroll view. `follow: true` sticks to the bottom, for logs. |
+| `scroll(follow:, followTop:)(child)` | Vertical scroll view. `follow: true` sticks to the bottom, for logs. `followTop: true` sticks to the top, for newest-first feeds. |
 | `grid(cols:, minCell:, gap:, cross:)(kids...)` | Rows of equal columns: `cols` of them, or as many at least `minCell` wide as fit. |
 | `stack(x:, y:)(kids...)` | Children on top of each other, the last on top. |
 | `aligned(x:, y:)(child)` | Stack child with its own placement. |
