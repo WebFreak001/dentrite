@@ -13,6 +13,8 @@ struct SDL_Cursor;
 alias SDL_GLContext = SDL_GLContextState*;
 /// Function pointer returned by `SDL_GL_GetProcAddress`.
 alias SDL_FunctionPointer = void function();
+/// Property group handle, 0 for none.
+alias SDL_PropertiesID = uint;
 
 /// Pixel buffer. Fields are read-only, `pixels` is writable.
 struct SDL_Surface
@@ -315,8 +317,18 @@ uint SDL_RegisterEvents(int count);                     /// first of `count` use
 
 bool SDL_StartTextInput(SDL_Window* window);            /// enables text events
 bool SDL_StopTextInput(SDL_Window* window);             /// disables text events
+/// Enables text events with properties such as `SDL_PROP_TEXTINPUT_TYPE_NUMBER`.
+bool SDL_StartTextInputWithProperties(SDL_Window* window, SDL_PropertiesID props);
 /// Where an input method places its windows, `cursor` from `rect.x`, all in window coordinates.
 bool SDL_SetTextInputArea(SDL_Window* window, const(SDL_Rect)* rect, int cursor);
+
+SDL_PropertiesID SDL_CreateProperties();               /// new empty property group, 0 on failure
+void SDL_DestroyProperties(SDL_PropertiesID props);     /// frees a property group
+/// Sets number property `name` of `props`.
+bool SDL_SetNumberProperty(SDL_PropertiesID props, const(char)* name, long value);
+
+enum SDL_PROP_TEXTINPUT_TYPE_NUMBER = "SDL.textinput.type"; /// text input property, an SDL_TextInputType
+enum SDL_TEXTINPUT_TYPE_TEXT_PASSWORD_HIDDEN = 4;          /// SDL_TextInputType for a hidden password
 ushort SDL_GetModState();                              /// held modifiers, SDL_KMOD_* bits
 
 char* SDL_GetClipboardText();                           /// clipboard, free with SDL_free

@@ -183,6 +183,7 @@ final class Ui
     size_t composeFrom; /// byte offset into `composing` where the part being converted starts
     size_t composeTo;  /// byte offset into `composing` where that part ends, also the caret
     Rect caret;        /// caret of the focused text box as last painted, empty for none
+    bool hiddenText;   /// the focused text box is a password
     ulong accessSalt;  /// mixed into the access ids of this pass's nodes, unique per island
     Id accessClick;    /// control an assistive technology clicked, taken by its next `clickable`
     Tree window;       /// the window's tree, where popups open, null without an island in a window
@@ -239,6 +240,7 @@ final class Ui
         begin();
         foreach (int i; 1 .. maxPasses + 1)
         {
+            hiddenText = false;
             view(this);
             settleStep();
             if ((again == false && queued.length == 0) || i == maxPasses)

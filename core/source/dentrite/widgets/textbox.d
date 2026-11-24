@@ -9,7 +9,9 @@ import dentrite.node;
 import dentrite.signals : Signal, effect;
 import dentrite.text;
 import std.algorithm.comparison : clamp, max, min;
+import std.array : replicate;
 import std.ascii : isAlphaNum;
+import std.range.primitives : walkLength;
 import std.math : isInfinity, round;
 import std.utf : stride, strideBack;
 
@@ -55,6 +57,7 @@ struct LineEdit
     float caretX = 0;     /// caret x from the text start as last painted, in logical pixels
     MonoTime blinkStart;  /// when the caret blink last restarted, shown from then
     bool dragging;        /// selecting with the pointer
+    bool password;        /// shows a dot per character, keeps the text off the clipboard and hides compositions
 
     /// Takes `v` from outside, keeping the caret and selection inside it.
     void setText(string v)
@@ -126,7 +129,7 @@ struct LineEdit
             {
                 return typesText(e);
             }
-            if (caret != anchor && sv !is null)
+            if (caret != anchor && sv !is null && password == false)
             {
                 sv.setClipboard(text[min(caret, anchor) .. max(caret, anchor)]);
                 if (e.key == Key.x)
@@ -167,10 +170,10 @@ struct LineEdit
     }
 
     /// Shows input method text `s` in place of the selection, single line, null to clear. Bytes `from .. to` of
-    /// it are the part being converted, or the caret when equal.
+    /// it are the part being converted, or the caret when equal. Nothing for a password.
     void compose(string s, size_t from, size_t to)
     {
-        composing = singleLine(s);
+        composing = password ? null : singleLine(s);
         composeFrom = min(from, composing.length);
         composeTo = min(to, composing.length);
     }
@@ -228,9 +231,13 @@ struct LineEdit
         return i >= text.length ? text.length : i + stride(text, i);
     }
 
-    /// Start of the word at or before `i`.
+    /// Start of the word at or before `i`, 0 for a password.
     private size_t wordStart(size_t i)
     {
+        if (password)
+        {
+            return 0;
+        }
         while (i > 0 && isAlphaNum(text[i - 1]) == false && text[i - 1] < 0x80)
         {
             --i;
@@ -242,9 +249,13 @@ struct LineEdit
         return i;
     }
 
-    /// End of the word at or after `i`.
+    /// End of the word at or after `i`, the text end for a password.
     private size_t wordEnd(size_t i)
     {
+        if (password)
+        {
+            return text.length;
+        }
         while (i < text.length && isAlphaNum(text[i]) == false && text[i] < 0x80)
         {
             ++i;
@@ -255,7 +266,41 @@ struct LineEdit
         }
         return i;
     }
+
+    /// Text as drawn: the text, or a dot per character for a password.
+    string shown() const
+    {
+        return password ? mask.replicate(text.walkLength) : text;
+    }
+
+    /// Byte offset into `shown` of byte `i` of the text.
+    size_t toShown(size_t i) const
+    {
+        return password ? mask.length * text[0 .. min(i, text.length)].walkLength : i;
+    }
+
+    /// Byte offset into the text of byte `j` of `shown`.
+    size_t fromShown(size_t j) const
+    {
+        if (password == false)
+        {
+            return j;
+        }
+        size_t i;
+        foreach (size_t k; 0 .. j / mask.length)
+        {
+            if (i >= text.length)
+            {
+                break;
+            }
+            i += stride(text, i);
+        }
+        return i;
+    }
 }
+
+/// Dot drawn for each character of a password.
+private enum string mask = "•";
 
 /// Size of a text box under `c`: the bounded width or the minimum, one line tall.
 Size measureTextBox(Constraints c, const ref TextBoxStyle s, TextSystem t)
@@ -267,7 +312,7 @@ Size measureTextBox(Constraints c, const ref TextBoxStyle s, TextSystem t)
 size_t indexAtX(ref const LineEdit e, Rect r, const ref TextBoxStyle s, TextSystem t, float wx)
 {
     float local = wx - (r.x + s.padX - round(e.scrollX));
-    return t.shape(s.font, s.size, e.text).indexAt(local * t.ppp);
+    return e.fromShown(t.shape(s.font, s.size, e.shown).indexAt(local * t.ppp));
 }
 
 /// Caret of `e` in a box at `r` as last painted, in window coordinates.
@@ -297,11 +342,13 @@ void paintTextBox(ref PaintContext ctx, Rect r, const ref TextBoxStyle s, ref Li
     float top = r.y + s.padY;
     float lineH = t.lineHeight(s.font, s.size);
     float baseline = top + t.ascent(s.font, s.size);
-    size_t a = min(e.caret, e.anchor);
+    size_t a = e.toShown(min(e.caret, e.anchor));
+    size_t b = e.toShown(max(e.caret, e.anchor));
     bool composes = e.composing.length > 0;
-    string shown = composes ? e.text[0 .. a] ~ e.composing ~ e.text[max(e.caret, e.anchor) .. $] : e.text;
+    string drawn = e.shown;
+    string shown = composes ? drawn[0 .. a] ~ e.composing ~ drawn[b .. $] : drawn;
     ShapedRun run = t.shape(s.font, s.size, shown);
-    float caretPx = run.caretX(composes ? a + e.composeTo : e.caret) / t.ppp;
+    float caretPx = run.caretX(composes ? a + e.composeTo : e.toShown(e.caret)) / t.ppp;
     e.caretX = caretPx;
     float viewW = inner.w;
     if (caretPx - e.scrollX > viewW - 1)
@@ -322,7 +369,7 @@ void paintTextBox(ref PaintContext ctx, Rect r, const ref TextBoxStyle s, ref Li
         if (focused && e.caret != e.anchor && composes == false)
         {
             float sa = run.caretX(a) / t.ppp;
-            float sb = run.caretX(max(e.caret, e.anchor)) / t.ppp;
+            float sb = run.caretX(b) / t.ppp;
             ctx.list.rect(Rect(x0 + sa, top, sb - sa, lineH), s.selection);
         }
         ctx.list.text(run, Point(x0, baseline), enabled ? s.text : s.textDisabled);
@@ -416,12 +463,12 @@ class TextBox : Node, Composer
     /// Text field with its text and hint. Name it with `accessName` or a label.
     override void describe(ref AccessInfo a)
     {
-        a.role = Role.textInput;
-        a.value = line.text;
+        a.role = line.password ? Role.passwordInput : Role.textInput;
+        a.value = line.shown;
         a.placeholder = placeholder;
         a.disabled = enabled == false;
-        a.caret = line.caret;
-        a.anchor = line.anchor;
+        a.caret = line.toShown(line.caret);
+        a.anchor = line.toShown(line.anchor);
         a.allow(AccessAction.setValue);
     }
 
@@ -575,10 +622,13 @@ private string singleLine(string s)
 }
 
 /// Retained text box: `textBox(query, placeholder: "Filter")`. `enabled` greys it out and stops input when false.
+/// `password` draws a dot per character, keeps the text off the clipboard and asks for input methods off.
 TextBox textBox(Signal!string value, string placeholder = null, bool delegate() enabled = null,
-    string tooltip = null, string accessName = null)
+    string tooltip = null, string accessName = null, bool password = false)
 {
     TextBox b = new TextBox(value, placeholder);
+    b.line.password = password;
+    b.hiddenText = password;
     b.setTooltip(tooltip);
     b.accessName = accessName;
     if (enabled !is null)
@@ -613,12 +663,12 @@ final class TextBoxBox : Node
     /// Text field with its text and hint.
     override void describe(ref AccessInfo a)
     {
-        a.role = Role.textInput;
-        a.value = line.text;
+        a.role = line.password ? Role.passwordInput : Role.textInput;
+        a.value = line.shown;
         a.placeholder = placeholder;
         a.disabled = enabled == false;
-        a.caret = line.caret;
-        a.anchor = line.anchor;
+        a.caret = line.toShown(line.caret);
+        a.anchor = line.toShown(line.anchor);
     }
 
     /// Same size as the retained box.
@@ -641,14 +691,16 @@ final class TextBoxBox : Node
 
 /// Island text box over `value`. A press places the caret, a drag selects, and double and triple clicks select a
 /// word and everything. With focus it takes typed text, editing keys, the clipboard and input method text, and
-/// leaves other keys, such as Enter, to the pass. True on the passes it changes `value`.
+/// leaves other keys, such as Enter, to the pass. True on the passes it changes `value`. `password` draws a dot per
+/// character, keeps the text off the clipboard and asks for input methods off.
 bool textBox(Ui ui, ref string value, string placeholder = null, bool enabled = true, string accessName = null,
-    string file = __FILE__, size_t line = __LINE__)
+    bool password = false, string file = __FILE__, size_t line = __LINE__)
 {
     Id i = ui.id(file, line);
     Press p = ui.clickable(i, enabled);
     TextBoxStyle s = ui.style!TextBoxStyle();
     LineEdit* ed = ui.memoryFor(i, LineEdit.init);
+    ed.password = password;
     if (ed.text != value)
     {
         ed.setText(value);
@@ -675,6 +727,7 @@ bool textBox(Ui ui, ref string value, string placeholder = null, bool enabled = 
     ed.composing = null;
     if (has)
     {
+        ui.hiddenText = password;
         if (ui.typed.length > 0)
         {
             ed.type(ui.typed);
@@ -751,6 +804,71 @@ unittest
     assert(q.peek == "parser.d", "a two-byte character removed whole");
     b.setEnabled(false);
     assert(b.onText("x") == false && b.onKey(bs) == false && q.peek == "parser.d" && b.focusable == false);
+}
+
+// A password shows a dot per character, moves by character only, keeps the clipboard and input methods out, and
+// maps carets between the text and its dots.
+unittest
+{
+    import dentrite.signals : signal;
+
+    Signal!string q = signal("");
+    TextBox b = textBox(q, password: true);
+    b.onText("hé!");
+    assert(q.peek == "hé!" && b.line.shown == "•••");
+    assert(b.line.toShown(3) == 6 && b.line.fromShown(6) == 3 && b.line.fromShown(9) == 4);
+    AccessInfo a;
+    b.describe(a);
+    assert(a.role == Role.passwordInput && a.value == "•••" && a.caret == 9);
+    KeyEvent left = KeyEvent(Key.left, Mod.ctrl);
+    b.onKey(left);
+    assert(b.caret == 0, "the whole password is one word");
+    KeyEvent all = KeyEvent(Key.a, Mod.ctrl);
+    b.onKey(all);
+    KeyEvent cut = KeyEvent(Key.x, Mod.ctrl);
+    b.onKey(cut);
+    assert(q.peek == "hé!", "cutting does nothing");
+    b.compose("か", 0, 3);
+    assert(b.line.composing.length == 0);
+}
+
+// Focus on a password box, retained or in an island, asks the platform for hidden text input, and focus on a plain
+// box asks for plain text input again.
+unittest
+{
+    import dentrite.containers : column, expanded;
+    import dentrite.headless : HeadlessPlatform;
+    import dentrite.host : Host;
+    import dentrite.island : Island, island;
+    import dentrite.signals : signal;
+    import dentrite.widgets.menu : menuHost;
+
+    Host h = menuHost(300, 200);
+    scope (exit)
+    {
+        h.close();
+    }
+    HeadlessPlatform p = cast(HeadlessPlatform) h.platform;
+    TextBox plain = textBox(signal(""));
+    TextBox secret = textBox(signal(""), password: true);
+    string name, pass;
+    Island isl = island((Ui ui) {
+        ui.textBox(name);
+        ui.textBox(pass, password: true);
+    });
+    h.setRoot(column()(plain, secret, expanded(isl)));
+    h.frame();
+    h.setFocus(secret);
+    assert(p.textOn && p.textHidden);
+    h.setFocus(plain);
+    assert(p.textOn && p.textHidden == false);
+    h.setFocus(isl);
+    isl.enterFocus(false);
+    h.frame();
+    assert(p.textOn && p.textHidden == false, "the island's first box is plain");
+    h.injectKey(Key.tab);
+    h.frame();
+    assert(p.textOn && p.textHidden, "its second is a password");
 }
 
 // Input method text shows in place of the selection without editing, keys wait until it is committed, the

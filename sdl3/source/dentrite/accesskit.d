@@ -307,7 +307,7 @@ private accesskit_node* nodeOf(ref const AccessNode n)
 /// True for the roles whose text AccessKit reads from text runs.
 private bool isText(Role r)
 {
-    return r == Role.textInput || r == Role.multilineTextInput;
+    return r == Role.textInput || r == Role.passwordInput || r == Role.multilineTextInput;
 }
 
 /// Part of a field's text in one text run: a line, or 255 characters of it, with the newline that ends it.
@@ -449,6 +449,8 @@ private ubyte roleOf(Role r)
         return ACCESSKIT_ROLE_PROGRESS_INDICATOR;
     case Role.textInput:
         return ACCESSKIT_ROLE_TEXT_INPUT;
+    case Role.passwordInput:
+        return ACCESSKIT_ROLE_PASSWORD_INPUT;
     case Role.multilineTextInput:
         return ACCESSKIT_ROLE_MULTILINE_TEXT_INPUT;
     case Role.spinButton:

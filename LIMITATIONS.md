@@ -4,8 +4,9 @@ Known gaps, by area.
 
 ## Platform
 
-- One window per process. The SDL3 platform reads every window's events and
-  quits SDL when it closes.
+- One top-level window per process, no second window with its own UI tree.
+  The SDL3 platform owns SDL, reads the events of every window (its popup
+  windows included) and quits SDL when it closes.
 - Popup windows: only run on X11. Without a compositor the shadow room
   around them shows black. Each opens its own GL context, about 10 ms with
   llvmpipe. Dialogs and other centered popups stay inside the window.
@@ -53,6 +54,10 @@ Known gaps, by area.
 - Input methods: the platform draws the candidate list. A press in a text
   area waits for the commit. Lists show no composition.
 - X11 without an input method: dead key accents do not show.
+- Password boxes ask SDL for password text input. Whether the input method
+  turns off is up to SDL and the platform. Where it stays on, the composition
+  is hidden and only its commit lands. The text stays in memory as a plain
+  string.
 - `ui.withStyle` edits do not reach island labels, which resolve their style
   at layout.
 

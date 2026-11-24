@@ -47,7 +47,7 @@ The slider and the spin box share `s.width`, so either one moves the other.
 | `button(caption, onClick:)` | `button` | Buttons |
 | `checkbox(signal, caption)` | `checkbox` | Check boxes |
 | `radio(signal, option, caption)`, `radioGroup(signal)` | `radio` | Radio buttons |
-| `textBox(signal)` | `textbox` | Text boxes |
+| `textBox(signal, password:)` | `textbox` | Text boxes |
 | `textArea(signal, wrap:)` | `textarea` | Text areas |
 | `spinBox(signal, min, max, step)` | `spinbox` | Spin boxes |
 | `slider(signal, min, max, step)` | `slider` | Sliders |

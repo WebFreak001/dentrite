@@ -21,6 +21,7 @@ final class HeadlessPlatform : Platform, FileDialogs, AccessAdapter, WindowContr
     string clip;         /// clipboard contents
     CursorShape cursor;  /// last cursor set
     bool textOn;         /// true while text input is on
+    bool textHidden;     /// true while text input is on for a password
     Rect inputArea;      /// last caret for an input method
     int presented;       /// frames presented
     AccessDemand listening; /// what `demand` answers, `full` turns into `changes` once read
@@ -178,10 +179,11 @@ final class HeadlessPlatform : Platform, FileDialogs, AccessAdapter, WindowContr
         cursor = shape;
     }
 
-    /// Records whether text input is on.
-    void textInput(bool on)
+    /// Records whether text input is on, and for a password.
+    void textInput(bool on, bool hidden)
     {
         textOn = on;
+        textHidden = on && hidden;
     }
 
     /// Records the input method caret.

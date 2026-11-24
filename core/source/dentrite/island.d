@@ -127,6 +127,7 @@ final class Island : Node, Updatable, FocusScope, Composer, AccessContent, Acces
             first = false;
             ui.frame(content, r);
         });
+        hiddenText = ui.hiddenText;
         invalidateLayer();
         if (ui.frameWanted)
         {

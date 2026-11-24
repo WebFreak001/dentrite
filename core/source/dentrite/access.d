@@ -32,6 +32,7 @@ enum Role : ubyte
     slider,             /// number in a range
     progressIndicator,  /// progress of a task
     textInput,          /// single line text
+    passwordInput,      /// single line text shown as dots
     multilineTextInput, /// text over several lines
     spinButton,         /// number with step buttons
     comboBox,           /// choice from a popup list

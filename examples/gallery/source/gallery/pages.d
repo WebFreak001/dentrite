@@ -252,6 +252,7 @@ Node textBoxesPage()
     Signal!string name = signal("");
     Signal!string shared_ = signal("Edit me in either box");
     Signal!bool editable = signal(false);
+    Signal!string secret = signal("");
     return column(gap: 22)(
         section("Placeholder and binding", column(gap: 8)(
             narrow(320, textBox(name, placeholder: "Your name")),
@@ -265,6 +266,10 @@ Node textBoxesPage()
         section("Disabled", column(gap: 8, cross: CrossAlign.start)(
             checkbox(editable, "Editable"),
             narrow(320, textBox(shared_, enabled: &editable.get)),
+        )),
+        section("Password", column(gap: 8)(
+            narrow(320, textBox(secret, placeholder: "Password", password: true)),
+            label(() => format("%d characters, kept off the clipboard", secret.get.count), "muted"),
         )),
         section("Keys", label("Arrows, Home and End move, Shift selects, Ctrl moves by word, Ctrl+A selects all, "
             ~ "Ctrl+C, X and V use the clipboard, Ctrl+Backspace deletes a word. A dead key's accent or other "

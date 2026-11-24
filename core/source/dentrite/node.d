@@ -563,6 +563,7 @@ abstract class Node
     bool focusable;      /// takes keyboard focus on press and Tab
     bool keepFocus;      /// a press inside leaves focus where it is, as on a menu bar
     bool textInput;      /// wants text input events while focused
+    bool hiddenText;     /// its text input is a password, so the platform keeps input methods off where it can
     CursorShape cursor;  /// cursor shape while hovered
     bool hovered;        /// pointer is over it, set by the window
     bool pressed;        /// pointer pressed on it and not released yet, set by the window

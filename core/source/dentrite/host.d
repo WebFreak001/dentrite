@@ -123,6 +123,7 @@ class Host : Services
     private MonoTime frameTime;     /// start of the current frame
     private CursorShape cursorShown; /// cursor last set on the platform
     private bool textInputOn;       /// platform text input enabled
+    private bool textHiddenOn;      /// platform text input is for a password
     private string composing;       /// input method text not committed yet
     private Rect inputArea;         /// caret last given to the input method
     private bool keyboardFocus;     /// focus last moved by Tab
@@ -253,7 +254,8 @@ class Host : Services
             if (textInputOn)
             {
                 textInputOn = false;
-                platform.textInput(false);
+                textHiddenOn = false;
+                platform.textInput(false, false);
             }
         }
         if (old !is null)
@@ -268,13 +270,26 @@ class Host : Services
             n.markNeedsPaint();
             n.onFocus(true);
         }
-        bool wantText = n !is null && n.textInput;
-        if (wantText != textInputOn)
-        {
-            textInputOn = wantText;
-            platform.textInput(wantText);
-        }
+        syncTextInput();
         requestFrame();
+    }
+
+    /// Starts, stops or restarts platform text input to match the focused node, ending any composition.
+    private void syncTextInput()
+    {
+        bool want = focusNode !is null && focusNode.textInput;
+        bool hidden = want && focusNode.hiddenText;
+        if (want == textInputOn && hidden == textHiddenOn)
+        {
+            return;
+        }
+        if (composing.length > 0)
+        {
+            endComposition(focusNode);
+        }
+        textInputOn = want;
+        textHiddenOn = hidden;
+        platform.textInput(want, hidden);
     }
 
     /// Clears the composition `n` shows, if it is a `Composer`.
@@ -471,6 +486,7 @@ class Host : Services
             missed = missed || s.mesh.missedGlyphs;
         }
         tree.paintRequested = false;
+        syncTextInput();
         placeInputArea();
         updateAccess();
         MonoTime t4 = MonoTime.currTime;

@@ -194,7 +194,8 @@ interface Platform
     bool wait(ref Event e, Duration timeout); /// next event within `timeout`, no limit for `Duration.max`
     void present();                           /// shows what the renderer drew
     void setCursor(CursorShape shape);        /// pointer shape over the window
-    void textInput(bool on);                  /// starts or stops text events, which drops any composition
+    /// Starts or stops text events, which drops any composition. `hidden` for a password, input methods off.
+    void textInput(bool on, bool hidden);
     void textInputArea(Rect caret);           /// caret in physical pixels, where an input method shows candidates
     string clipboard();                       /// clipboard text, or null
     void setClipboard(string s);              /// sets the clipboard

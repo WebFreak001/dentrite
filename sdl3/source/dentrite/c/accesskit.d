@@ -160,6 +160,7 @@ enum : ubyte
     ACCESSKIT_ROLE_TABLE = 25,                 /// ditto
     ACCESSKIT_ROLE_MENU = 30,                  /// ditto
     ACCESSKIT_ROLE_MULTILINE_TEXT_INPUT = 31,  /// ditto
+    ACCESSKIT_ROLE_PASSWORD_INPUT = 40,        /// ditto
     ACCESSKIT_ROLE_COMBO_BOX = 56,             /// ditto
     ACCESSKIT_ROLE_DIALOG = 66,                /// ditto
     ACCESSKIT_ROLE_GROUP = 78,                 /// ditto

@@ -355,6 +355,7 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl, T
     private bool logInput;          /// DENTRITE_LOG_INPUT is set, so input events go to stderr
     private DeadKeys deadKeys;      /// dead key accents on Wayland, null elsewhere
     private bool textOn;            /// text input started
+    private bool textHidden;        /// text input started for a password
     private bool deadShown;         /// a dead key's accent is shown as composition
     private AccessKitAdapter access; /// screen reader bridge with `WindowOptions.accessibility`, else null
     private Event queued;           /// event `wait` hands out next, after one translated into two
@@ -999,7 +1000,7 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl, T
         }
         if (textOn)
         {
-            SDL_StartTextInput(made);
+            startText(made);
         }
         popups ~= p;
         return p;
@@ -1106,21 +1107,36 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl, T
     }
 
     /// Starts or stops SDL text events, on the popup windows too, as the topmost popup menu takes keyboard focus.
-    void textInput(bool on)
+    void textInput(bool on, bool hidden)
     {
         textOn = on;
+        textHidden = on && hidden;
         deadShown = false;
         foreach (SDL_Window* w; [win] ~ popupWindows())
         {
             if (on)
             {
-                SDL_StartTextInput(w);
+                startText(w);
             }
             else
             {
                 SDL_StopTextInput(w);
             }
         }
+    }
+
+    /// Starts text events on `w`, as a hidden password while `textHidden` is set.
+    private void startText(SDL_Window* w)
+    {
+        if (textHidden == false)
+        {
+            SDL_StartTextInput(w);
+            return;
+        }
+        SDL_PropertiesID props = SDL_CreateProperties();
+        SDL_SetNumberProperty(props, SDL_PROP_TEXTINPUT_TYPE_NUMBER, SDL_TEXTINPUT_TYPE_TEXT_PASSWORD_HIDDEN);
+        SDL_StartTextInputWithProperties(w, props);
+        SDL_DestroyProperties(props);
     }
 
     /// Tells the input method where the caret is, given in physical pixels, on the popup windows too.
