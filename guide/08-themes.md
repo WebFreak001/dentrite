@@ -25,6 +25,7 @@ fill = accent
 [text.mono]
 font = mono
 size = 12.5
+features = slashedZero | noContextual
 ```
 
 - `[palette]` names colors. A token may name another token.
@@ -34,7 +35,11 @@ size = 12.5
   from the base section, which starts from the struct defaults, then takes
   the variant's defaults in code, then this section.
 - Colors are `#rrggbb`, `#rrggbbaa` or a palette token. Other values are D
-  literals: numbers, `true`, enum members such as `uiStrong`.
+  literals: numbers, `true`, enum members such as `uiStrong`. Flags join
+  members with `|`.
+- `features` on `[text]`, `[textbox]` and `[textarea]` turns OpenType
+  features on and off, such as `tabular`, `fractions` or `noLigatures`. The
+  members are in `Features` in `dentrite.text`.
 
 Ctrl+R reloads the theme file while the app runs, unless a focused node or
 a shortcut takes the key. A theme with an error is not loaded, and the

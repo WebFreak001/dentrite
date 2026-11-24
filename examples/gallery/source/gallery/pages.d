@@ -51,7 +51,8 @@ import std.string : toLower;
 /// Styles the gallery theme may set: the library's, its own button variant and the chat page's.
 alias GalleryStyles = AliasSeq!(LibraryStyles, Variants!(ButtonStyle, "large"),
     Variants!(PanelStyle, "bubble", "bubbleMine"),
-    Variants!(TextStyle, "bubbleMine", "bubbleTime", "name0", "name1", "name2", "name3"));
+    Variants!(TextStyle, "bubbleMine", "bubbleTime", "name0", "name1", "name2", "name3"),
+    Variants!(TextStyle, "tabular", "fractions", "superscript", "slashedZero", "ss01", "noContextual"));
 
 /// Gallery page: sidebar title, one line about it, and its content.
 struct Page
@@ -223,6 +224,14 @@ Node textPage()
         variants ~= row(gap: 16)(sized(w: 110)(label(v.length == 0 ? "(default)" : v, "monoMuted")),
             label("The quick brown fox jumps over the lazy dog", v));
     }
+    Node[] features;
+    foreach (string[3] f; [["tabular", "", "11:11 08:47"], ["fractions", "", "1/2 3/4 15/16"],
+        ["superscript", "", "123"], ["slashedZero", "", "0x0040_1000"], ["ss01", "", "1234567890"],
+        ["noContextual", "mono", "a -> b != c <= d"]])
+    {
+        features ~= row(gap: 16)(sized(w: 110)(label(f[0], "monoMuted")), sized(w: 160)(label(f[2], f[1])),
+            label(f[2], f[0]));
+    }
     string para = "Labels wrap at word boundaries when given wrap: true. This paragraph wraps to the width of "
         ~ "the page, so resizing the window rewraps it. Only labels whose width changed are measured again.";
     return column(gap: 22)(
@@ -234,6 +243,7 @@ Node textPage()
             label("Mono: Ελληνικά 中文 ★", "mono"),
             label("Emoji: 😀 ⭐ 👍🏽 🇯🇵 ❤️ 1️⃣ 👩‍💻 ★ ☂"),
         )),
+        section("OpenType features", column(gap: 6)(features)),
         section("Alignment", column(gap: 6, cross: CrossAlign.start)(
             alignedLabel("Start", TextAlign.start),
             alignedLabel("Center", TextAlign.center),

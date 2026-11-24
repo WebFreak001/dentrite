@@ -30,6 +30,79 @@ enum FontKind : ubyte
     mono,     /// fixed pitch, for addresses, bytes and code
 }
 
+/// OpenType features to shape with, combined with `|`. Each member names its tag. Color fonts shape without them.
+/// NOTE: `ccmp`, `kern` and the mark features stay on, text needs them.
+enum Features : ulong
+{
+    none = 0,                 /// the font's defaults
+    tabular = 1UL << 0,       /// `tnum`, equal-width digits
+    proportional = 1UL << 1,  /// `pnum`, digits of their own widths
+    lining = 1UL << 2,        /// `lnum`, digits at cap height
+    oldstyle = 1UL << 3,      /// `onum`, digits with ascenders and descenders
+    slashedZero = 1UL << 4,   /// `zero`
+    fractions = 1UL << 5,     /// `frac`, digits around a slash as a fraction
+    ordinals = 1UL << 6,      /// `ordn`, 1st and 2nd with raised letters
+    superscript = 1UL << 7,   /// `sups`
+    subscript = 1UL << 8,     /// `subs`
+    caseForms = 1UL << 9,     /// `case`, punctuation placed for capitals
+    smallCaps = 1UL << 10,    /// `smcp`, lowercase as small capitals
+    capsToSmall = 1UL << 11,  /// `c2sc`, capitals as small capitals
+    discretionary = 1UL << 12, /// `dlig` on, rare ligatures
+    noLigatures = 1UL << 13,  /// `liga` and `clig` off
+    noContextual = 1UL << 14, /// `calt` off, also the code ligatures of fonts like JetBrains Mono
+    ss01 = 1UL << 15,         /// stylistic set 1
+    ss02 = 1UL << 16,         /// stylistic set 2
+    ss03 = 1UL << 17,         /// stylistic set 3
+    ss04 = 1UL << 18,         /// stylistic set 4
+    ss05 = 1UL << 19,         /// stylistic set 5
+    ss06 = 1UL << 20,         /// stylistic set 6
+    ss07 = 1UL << 21,         /// stylistic set 7
+    ss08 = 1UL << 22,         /// stylistic set 8
+    ss09 = 1UL << 23,         /// stylistic set 9
+    ss10 = 1UL << 24,         /// stylistic set 10
+    ss11 = 1UL << 25,         /// stylistic set 11
+    ss12 = 1UL << 26,         /// stylistic set 12
+    ss13 = 1UL << 27,         /// stylistic set 13
+    ss14 = 1UL << 28,         /// stylistic set 14
+    ss15 = 1UL << 29,         /// stylistic set 15
+    ss16 = 1UL << 30,         /// stylistic set 16
+    ss17 = 1UL << 31,         /// stylistic set 17
+    ss18 = 1UL << 32,         /// stylistic set 18
+    ss19 = 1UL << 33,         /// stylistic set 19
+    ss20 = 1UL << 34,         /// stylistic set 20
+}
+
+/// Tags of `Features` bit `i`, in bit order. `noLigatures` and `noContextual` turn theirs off.
+private immutable string[][] featureTags = [["tnum"], ["pnum"], ["lnum"], ["onum"], ["zero"], ["frac"], ["ordn"],
+    ["sups"], ["subs"], ["case"], ["smcp"], ["c2sc"], ["dlig"], ["liga", "clig"], ["calt"], ["ss01"], ["ss02"],
+    ["ss03"], ["ss04"], ["ss05"], ["ss06"], ["ss07"], ["ss08"], ["ss09"], ["ss10"], ["ss11"], ["ss12"], ["ss13"],
+    ["ss14"], ["ss15"], ["ss16"], ["ss17"], ["ss18"], ["ss19"], ["ss20"]];
+
+static assert(featureTags.length == __traits(allMembers, Features).length - 1, "a tag list per feature");
+
+/// Most HarfBuzz features one `Features` value turns into.
+private enum size_t maxFeatures = __traits(allMembers, Features).length;
+
+/// Fills `buf` with the HarfBuzz features of `f`, over the whole text, and returns the used part.
+private hb_feature_t[] hbFeatures(Features f, return ref hb_feature_t[maxFeatures] buf)
+{
+    size_t n;
+    foreach (size_t i, const string[] tags; featureTags)
+    {
+        if ((f & (1UL << i)) == 0)
+        {
+            continue;
+        }
+        Features bit = cast(Features)(1UL << i);
+        uint value = bit == Features.noLigatures || bit == Features.noContextual ? 0 : 1;
+        foreach (string t; tags)
+        {
+            buf[n++] = hb_feature_t(hbTag(t), value, 0, uint.max);
+        }
+    }
+    return buf[0 .. n];
+}
+
 /// Horizontal subpixel positions per pixel.
 enum int subpixelBins = 4;
 
@@ -330,7 +403,7 @@ private struct RunKey
 {
     FontKind kind; /// slot
     uint size64;   /// logical size times 64
-    bool tabular;  /// equal-width digits
+    Features features; /// OpenType features
     string text;   /// text shaped
 }
 
@@ -511,29 +584,28 @@ final class TextSystem
         return f.ascent / ppp;
     }
 
-    /// `text` shaped with `kind` at logical `size`, from the cache when possible. `tabular` asks for
-    /// equal-width digits.
-    ShapedRun shape(FontKind kind, float size, string text, bool tabular = false)
+    /// `text` shaped with `kind` at logical `size` and `features`, from the cache when possible.
+    ShapedRun shape(FontKind kind, float size, string text, Features features = Features.none)
     {
-        RunKey key = RunKey(kind, cast(uint) round(size * 64), tabular, text);
+        RunKey key = RunKey(kind, cast(uint) round(size * 64), features, text);
         if (CachedRun* hit = key in runs)
         {
             hit.used = frame;
             return hit.run;
         }
-        ShapedRun r = shapeUncached(font(kind, size), size, text, tabular);
-        runs[RunKey(kind, key.size64, tabular, r.text)] = CachedRun(r, frame);
+        ShapedRun r = shapeUncached(font(kind, size), size, text, features);
+        runs[RunKey(kind, key.size64, features, r.text)] = CachedRun(r, frame);
         return r;
     }
 
     /// Logical width of `text`.
-    float measure(FontKind kind, float size, string text, bool tabular = false)
+    float measure(FontKind kind, float size, string text, Features features = Features.none)
     {
-        return shape(kind, size, text, tabular).width / ppp;
+        return shape(kind, size, text, features).width / ppp;
     }
 
-    /// Shapes `text` with `f`, at logical `size`, and its fallbacks, with the `tnum` feature when `tabular`.
-    private ShapedRun shapeUncached(SizedFont f, float size, string text, bool tabular)
+    /// Shapes `text` with `f`, at logical `size`, and its fallbacks, with `features`.
+    private ShapedRun shapeUncached(SizedFont f, float size, string text, Features features)
     {
         ShapedRun r = new ShapedRun;
         r.text = text.idup;
@@ -550,12 +622,12 @@ final class TextSystem
             SizedFont want = fontFor(c, next, f, current, size);
             if (current !is null && want !is current)
             {
-                shapePart(r, current, start, at, tabular);
+                shapePart(r, current, start, at, features);
                 start = at;
             }
             current = want;
         }
-        shapePart(r, current is null ? f : current, start, r.text.length, tabular);
+        shapePart(r, current is null ? f : current, start, r.text.length, features);
         return r;
     }
 
@@ -596,14 +668,16 @@ final class TextSystem
     }
 
     /// Shapes bytes `[start, end)` of `r.text` with `f` and appends the glyphs to `r`, with the rest of the text
-    /// as context. Fills `r.faces` once a part uses a font other than `r.font`.
-    private void shapePart(ShapedRun r, SizedFont f, size_t start, size_t end, bool tabular)
+    /// as context and `features` unless `f` has color glyphs. Fills `r.faces` once a part uses a font other
+    /// than `r.font`.
+    private void shapePart(ShapedRun r, SizedFont f, size_t start, size_t end, Features features)
     {
         hb_buffer_clear_contents(buffer);
         hb_buffer_add_utf8(buffer, r.text.ptr, cast(int) r.text.length, cast(uint) start, cast(int)(end - start));
         hb_buffer_guess_segment_properties(buffer);
-        hb_feature_t tnum = hb_feature_t(hbTag("tnum"), 1, 0, uint.max);
-        hb_shape(f.hb, buffer, tabular ? &tnum : null, tabular ? 1 : 0);
+        hb_feature_t[maxFeatures] buf;
+        hb_feature_t[] list = f.color ? null : hbFeatures(features, buf);
+        hb_shape(f.hb, buffer, list.ptr, cast(uint) list.length);
         uint n;
         hb_glyph_info_t* infos = hb_buffer_get_glyph_infos(buffer, &n);
         hb_glyph_position_t* pos = hb_buffer_get_glyph_positions(buffer, &n);
@@ -1083,4 +1157,38 @@ unittest
     assert(px[3] == 255 && px[0] > 200 && px[1] > 150 && px[2] < 100, format("yellow forehead %s", px));
     assert(t.shape(FontKind.ui, 14, "👍🏽").glyphs.length == 1, "skin tone");
     assert(t.shape(FontKind.ui, 14, "🇯🇵").glyphs.length == 1, "flag");
+}
+
+// Features change the glyphs, key the cache, and skip color fonts.
+unittest
+{
+    TextSystem t = testEmojiText();
+    scope (exit)
+    {
+        t.dispose();
+    }
+    ShapedRun plain = t.shape(FontKind.ui, 13, "1111");
+    ShapedRun tnum = t.shape(FontKind.ui, 13, "1111", Features.tabular);
+    assert(tnum !is plain && tnum.width > plain.width, "tabular ones are wider");
+    assert(t.shape(FontKind.ui, 13, "1111", Features.tabular) is tnum, "cached apart");
+    assert(t.shape(FontKind.ui, 13, "1/2", Features.fractions).glyphs != t.shape(FontKind.ui, 13, "1/2").glyphs);
+    assert(t.shape(FontKind.ui, 13, "(x)", Features.caseForms).glyphs != t.shape(FontKind.ui, 13, "(x)").glyphs);
+    assert(t.shape(FontKind.ui, 13, "0", Features.slashedZero | Features.tabular).glyphs
+        != t.shape(FontKind.ui, 13, "0", Features.tabular).glyphs, "flags combine");
+    ShapedRun arrow = t.shape(FontKind.mono, 13, "a->b");
+    assert(t.shape(FontKind.mono, 13, "a->b", Features.noContextual).glyphs != arrow.glyphs, "code ligature off");
+    assert(t.shape(FontKind.ui, 14, "👍🏽", Features.noLigatures | Features.noContextual).glyphs.length == 1,
+        "emoji keep their sequences");
+}
+
+// Each flag turns into its tags, the `no` ones turn theirs off.
+unittest
+{
+    hb_feature_t[maxFeatures] buf;
+    hb_feature_t[] l = hbFeatures(Features.tabular | Features.noLigatures | Features.ss20, buf);
+    assert(l.length == 4);
+    assert(l[0].tag == hbTag("tnum") && l[0].value == 1);
+    assert(l[1].tag == hbTag("liga") && l[1].value == 0 && l[2].tag == hbTag("clig") && l[2].value == 0);
+    assert(l[3].tag == hbTag("ss20") && l[3].value == 1 && l[3].end == uint.max);
+    assert(hbFeatures(Features.none, buf).length == 0);
 }

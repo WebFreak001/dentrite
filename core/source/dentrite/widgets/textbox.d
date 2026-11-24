@@ -36,6 +36,7 @@ struct TextBoxStyle
     float minWidth = 80;  /// width when the parent leaves the width open
     FontKind font = FontKind.ui; /// text font
     float size = 13;      /// text size
+    Features features;    /// OpenType features
 }
 
 /// True if `e` is a key that types text, so shortcuts without Ctrl, Alt or Super do not fire while typing.
@@ -312,7 +313,7 @@ Size measureTextBox(Constraints c, const ref TextBoxStyle s, TextSystem t)
 size_t indexAtX(ref const LineEdit e, Rect r, const ref TextBoxStyle s, TextSystem t, float wx)
 {
     float local = wx - (r.x + s.padX - round(e.scrollX));
-    return e.fromShown(t.shape(s.font, s.size, e.shown).indexAt(local * t.ppp));
+    return e.fromShown(t.shape(s.font, s.size, e.shown, s.features).indexAt(local * t.ppp));
 }
 
 /// Caret of `e` in a box at `r` as last painted, in window coordinates.
@@ -347,7 +348,7 @@ void paintTextBox(ref PaintContext ctx, Rect r, const ref TextBoxStyle s, ref Li
     bool composes = e.composing.length > 0;
     string drawn = e.shown;
     string shown = composes ? drawn[0 .. a] ~ e.composing ~ drawn[b .. $] : drawn;
-    ShapedRun run = t.shape(s.font, s.size, shown);
+    ShapedRun run = t.shape(s.font, s.size, shown, s.features);
     float caretPx = run.caretX(composes ? a + e.composeTo : e.toShown(e.caret)) / t.ppp;
     e.caretX = caretPx;
     float viewW = inner.w;
@@ -364,7 +365,7 @@ void paintTextBox(ref PaintContext ctx, Rect r, const ref TextBoxStyle s, ref Li
     ctx.clipped(inner, {
         if (shown.length == 0 && placeholder.length > 0)
         {
-            ctx.list.text(t.shape(s.font, s.size, placeholder), Point(inner.x, baseline), s.placeholder);
+            ctx.list.text(t.shape(s.font, s.size, placeholder, s.features), Point(inner.x, baseline), s.placeholder);
         }
         if (focused && e.caret != e.anchor && composes == false)
         {

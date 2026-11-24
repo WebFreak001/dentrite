@@ -50,6 +50,9 @@ Known gaps, by area.
   and SVG fonts draw nothing, sbix (Apple) is untested and not in the system
   list. Color glyphs snap to whole pixels, bitmaps scale up without smoothing.
 - Emoji presentation comes from a built-in table, not Unicode data.
+- OpenType features apply to a whole label, text box or text area, not a
+  range. Other widgets shape with the font defaults. Variable font axes stay at
+  their defaults.
 - System fonts come from a fixed path list, no fontconfig.
 - Input methods: the platform draws the candidate list. A press in a text
   area waits for the commit. Lists show no composition.

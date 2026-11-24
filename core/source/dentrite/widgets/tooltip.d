@@ -82,7 +82,7 @@ private final class TipBox : Node
     {
         TooltipStyle s = tree.style!TooltipStyle();
         TextSystem t = tree.text;
-        run = t.shape(s.font, s.size, text, false);
+        run = t.shape(s.font, s.size, text);
         float room = max(0f, min(s.maxWidth, c.maxW) - s.padX * 2);
         if (run.width / t.ppp > room)
         {

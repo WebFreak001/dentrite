@@ -18,7 +18,7 @@ Why:
   the space it gets, split views and width caps.
 - Raw GL islands for custom drawing.
 - SDL3 window, OpenGL 3.3 or software renderer.
-- FreeType and HarfBuzz text.
+- FreeType and HarfBuzz text, OpenType features per style.
 - AccessKit accessibility, opt-in.
 - No UI library underneath.
 

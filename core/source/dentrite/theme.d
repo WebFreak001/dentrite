@@ -5,10 +5,11 @@
 /// with `static void applyVariant(ref T, string)` gives its variants a look of
 /// their own without a theme, applied between the two. An app adds variants of
 /// its own with `Variants`. Colors are `#rrggbb`, `#rrggbbaa` or a
-/// palette token, other values are D literals. The same code runs at compile time
-/// over a string import.
+/// palette token, flags are enum members joined by `|`, other values are D
+/// literals. The same code runs at compile time over a string import.
 module dentrite.theme;
 
+import std.algorithm.iteration : splitter;
 import std.algorithm.searching : all, startsWith;
 import std.ascii : isHexDigit;
 import std.conv : ConvException, to;
@@ -103,6 +104,24 @@ Color[string] paletteOf(const Section[] sections, string file)
     return palette;
 }
 
+/// `s` as a `T`, enum members joined by `|` for flags. Throws `ConvException` on a bad value.
+private T valueOf(T)(string s)
+{
+    static if (is(T == enum))
+    {
+        if (s.indexOf('|') >= 0)
+        {
+            T v = cast(T) 0;
+            foreach (string m; s.splitter('|'))
+            {
+                v |= to!T(m.strip);
+            }
+            return v;
+        }
+    }
+    return to!T(s);
+}
+
 /// Sets the fields of `s` named by the entries of `sec`. Throws on an unknown field or a bad value.
 void apply(T)(ref T s, const Section sec, const Color[string] palette, string file)
 {
@@ -123,7 +142,7 @@ void apply(T)(ref T s, const Section sec, const Color[string] palette, string fi
                 {
                     try
                     {
-                        __traits(getMember, s, name) = to!F(e.value);
+                        __traits(getMember, s, name) = valueOf!F(e.value);
                     }
                     catch (ConvException)
                     {
@@ -332,6 +351,14 @@ version (unittest)
         loud,  /// bigger and bold
     }
 
+    /// Lines drawn by `Probe`, a flag set.
+    private enum Lines
+    {
+        none = 0,   /// no lines
+        under = 1,  /// underline
+        strike = 2, /// strike through
+    }
+
     /// Style struct for the tests.
     private struct Probe
     {
@@ -341,6 +368,7 @@ version (unittest)
         Color ink;       /// text color
         float size = 12; /// text size
         bool bold;       /// heavy weight
+        Lines lines;     /// decoration
     }
 
     /// Theme text for the tests.
@@ -423,4 +451,14 @@ unittest
     static assert(loud.size == 16 && loud.ink == Color(0x1d, 0x1d, 0x20, 0xff));
     static assert(__traits(compiles, { enum Probe p = loadStyle!Probe(sample ~ "[probe]\nsiz = 1", "t", null); })
         == false);
+}
+
+// Flags join enum members with `|`.
+unittest
+{
+    Theme t = new Theme(sample ~ "[probe.quiet]\nlines = under | strike\n", "t.theme");
+    assert(t.style!Probe("quiet").lines == (Lines.under | Lines.strike));
+    assert(t.style!Probe("loud").lines == Lines.none);
+    assert(thrown({ new Theme(sample ~ "[probe]\nlines = under | dots\n", "t.theme").check!Probe(); })
+        == "t.theme(15): under | dots is not a Lines");
 }

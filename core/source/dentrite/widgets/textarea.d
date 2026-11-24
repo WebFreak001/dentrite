@@ -51,6 +51,7 @@ struct TextAreaStyle
     float gutterPad = 8;  /// space either side of the line numbers
     FontKind font = FontKind.ui; /// text font
     float size = 13;      /// text size
+    Features features;    /// OpenType features of the text, line numbers are tabular
 
     /// Look of `variant` without a theme.
     static void applyVariant(ref TextAreaStyle s, string variant)
@@ -472,7 +473,7 @@ final class TextArea : Node, Composer
         size_t digits = max(2, lines.length.to!string.length);
         char[] zeros = new char[digits];
         zeros[] = '0';
-        return round(tree.text.measure(s.font, s.size, zeros.idup, true) + s.gutterPad * 2);
+        return round(tree.text.measure(s.font, s.size, zeros.idup, Features.tabular) + s.gutterPad * 2);
     }
 
     /// Text area inside the gutter and padding, for a box at `origin`.
@@ -511,7 +512,7 @@ final class TextArea : Node, Composer
             string line = shownLine(i);
             if (runs[i] is null)
             {
-                runs[i] = t.shape(s.font, s.size, line);
+                runs[i] = t.shape(s.font, s.size, line, s.features);
             }
             ShapedRun r = runs[i];
             wide = max(wide, r.width);
@@ -738,7 +739,7 @@ final class TextArea : Node, Composer
         ctx.clipped(clip, {
             if (lines.length == 1 && lines[0].length == 0 && placeholder.length > 0)
             {
-                ctx.list.text(t.shape(s.font, s.size, placeholder), Point(tr.x, tr.y + asc), s.placeholder);
+                ctx.list.text(t.shape(s.font, s.size, placeholder, s.features), Point(tr.x, tr.y + asc), s.placeholder);
             }
             foreach (size_t k; firstVis .. lastVis)
             {
@@ -776,7 +777,7 @@ final class TextArea : Node, Composer
                     {
                         continue;
                     }
-                    ShapedRun n = t.shape(s.font, s.size, (rows[k].line + 1).to!string, true);
+                    ShapedRun n = t.shape(s.font, s.size, (rows[k].line + 1).to!string, Features.tabular);
                     float y = tr.y + k * lh - sy + asc;
                     ctx.list.text(n, Point(r.x + g - s.gutterPad - n.width / t.ppp, y),
                         rows[k].line == caret.line && focused ? s.gutterCurrent : s.gutterText);

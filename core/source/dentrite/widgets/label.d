@@ -31,7 +31,7 @@ struct TextStyle
     FontKind font = FontKind.ui;                 /// which loaded font to use
     float size = 13;                             /// text size in logical pixels
     Color color = Color(0xdd, 0xdd, 0xdd, 0xff); /// text color
-    bool tabular;                                /// equal-width digits, for counters
+    Features features;                           /// OpenType features, `Features.tabular` for counters
 
     /// Look of `variant` without a theme.
     static void applyVariant(ref TextStyle s, string variant)
@@ -147,7 +147,7 @@ final class Label : Node
         if (tree !is null && run !is null && wrap == false)
         {
             TextStyle st = tree.style!TextStyle(variant);
-            ShapedRun next = tree.text.shape(st.font, st.size, s, st.tabular);
+            ShapedRun next = tree.text.shape(st.font, st.size, s, st.features);
             if (next.width == run.width)
             {
                 run = next;
@@ -169,7 +169,7 @@ final class Label : Node
         TextStyle before = tree is null ? TextStyle.init : tree.style!TextStyle(variant);
         variant = v;
         TextStyle after = tree is null ? TextStyle.init : tree.style!TextStyle(variant);
-        if (before.font == after.font && before.size == after.size && before.tabular == after.tabular)
+        if (before.font == after.font && before.size == after.size && before.features == after.features)
         {
             markNeedsPaint();
             return;
@@ -182,7 +182,7 @@ final class Label : Node
     {
         TextStyle s = tree.style!TextStyle(variant);
         TextSystem t = tree.text;
-        run = t.shape(s.font, s.size, text, s.tabular);
+        run = t.shape(s.font, s.size, text, s.features);
         if (wrap && isInfinity(c.maxW) == false && run.width / t.ppp > c.maxW)
         {
             lines = .wrap(run, c.maxW * t.ppp);

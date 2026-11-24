@@ -381,8 +381,8 @@ final class SpinBox : Node
         float w = c.minW;
         if (c.minW != c.maxW)
         {
-            float digits = max(t.measure(ts.font, ts.size, formatted(range.lo)),
-                t.measure(ts.font, ts.size, formatted(range.hi)));
+            float digits = max(t.measure(ts.font, ts.size, formatted(range.lo), ts.features),
+                t.measure(ts.font, ts.size, formatted(range.hi), ts.features));
             w = max(c.minW, s.minWidth, ceil(digits + ts.padX * 2 + s.buttonWidth + 1));
         }
         Size sz = c.constrain(Size(w, t.lineHeight(ts.font, ts.size) + ts.padY * 2));

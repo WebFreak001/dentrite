@@ -74,6 +74,27 @@ color = red.400
 [text.warn]
 color = amber.400
 
+# Text page: one OpenType feature each.
+[text.tabular]
+features = tabular
+
+[text.fractions]
+features = fractions
+
+[text.superscript]
+features = superscript
+
+[text.slashedZero]
+features = slashedZero
+
+[text.ss01]
+features = ss01
+
+[text.noContextual]
+font = mono
+size = 12.5
+features = noContextual | noLigatures
+
 # Chat page: names in sender colors, times, the user's own bubbles.
 [text.name0]
 font = uiStrong
