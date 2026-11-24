@@ -1,4 +1,5 @@
-/// Layout containers: rows, columns, grids, stacks, padding, panels, fixed sizes and a vertical scroll view.
+/// Layout containers: rows, columns, grids, stacks, padding, panels, fixed sizes, a vertical scroll view
+/// and a squeeze picking a child by the space it gets.
 ///
 /// Builders take options by name in one call and children in a second call:
 /// `row(gap: 4)(a, b)`. One call would bind a positional child after a named
@@ -450,6 +451,162 @@ GridSpec grid(int cols = 0, float minCell = 0, float gap = 0, CrossAlign cross =
 {
     assert(cols > 0 || minCell > 0, "grid needs cols or minCell");
     return GridSpec(cols, minCell, gap, cross);
+}
+
+/// Child of a squeeze, shown while the space offered holds its ranges. Elsewhere it passes the space through.
+final class Fits : Node
+{
+    float minW = 0;              /// smallest width offered
+    float maxW = float.infinity; /// largest width offered
+    float minH = 0;              /// smallest height offered
+    float maxH = float.infinity; /// largest height offered
+
+    /// Wraps `child` with the ranges.
+    this(float minW, float maxW, float minH, float maxH, Node child)
+    {
+        this.minW = minW;
+        this.maxW = maxW;
+        this.minH = minH;
+        this.maxH = maxH;
+        add(child);
+    }
+
+    /// True if the largest size `c` allows is within the ranges, bounds included.
+    bool holds(Constraints c) const
+    {
+        return c.maxW >= minW && c.maxW <= maxW && c.maxH >= minH && c.maxH <= maxH;
+    }
+
+    /// Passes constraints through to the child.
+    protected override Size performLayout(Constraints c)
+    {
+        Node child = children[0];
+        child.offset = Point.init;
+        return child.layout(c);
+    }
+}
+
+/// Size ranges, waiting for the child.
+struct FitsSpec
+{
+    float minW; /// smallest width offered
+    float maxW; /// largest width offered
+    float minH; /// smallest height offered
+    float maxH; /// largest height offered
+
+    /// Stores the ranges. Needed because `opCall` hides the struct literal.
+    this(float minW, float maxW, float minH, float maxH)
+    {
+        this.minW = minW;
+        this.maxW = maxW;
+        this.minH = minH;
+        this.maxH = maxH;
+    }
+
+    /// The child of a squeeze shown while the space offered holds the ranges.
+    Fits opCall(Node child)
+    {
+        return new Fits(minW, maxW, minH, maxH, child);
+    }
+}
+
+/// Size ranges, in logical pixels, a squeeze checks before showing `child`: `fits(minW: 800)(wide)`.
+FitsSpec fits(float minW = 0, float maxW = float.infinity, float minH = 0, float maxH = float.infinity)
+{
+    return FitsSpec(minW, maxW, minH, maxH);
+}
+
+/// Shows the first child that fits the space offered and detaches the others.
+///
+/// A `fits` child fits while the largest size offered is within its ranges, an
+/// unbounded axis counting as infinitely large. Any other child always fits,
+/// so the last is the fallback. With none fitting the squeeze is empty. The
+/// pick happens during layout, from the constraints alone. Detached children
+/// stay built and keep their state, as the pages of `tabs` do. Focus inside
+/// a child that leaves is dropped.
+final class Squeeze : Node
+{
+    private Node[] options; /// every child, the shown one included, in order
+
+    /// Holds `kids`, none attached until the first layout.
+    this(Node[] kids)
+    {
+        foreach (Node k; kids)
+        {
+            assert(k.parent is null, "node already has a parent");
+        }
+        options = kids;
+    }
+
+    /// Children to pick from, in order.
+    const(Node)[] choices() const
+    {
+        return options;
+    }
+
+    /// Index in `choices` of the shown child, or -1.
+    int shown() const
+    {
+        foreach (size_t i, const(Node) o; options)
+        {
+            if (children.length > 0 && o is children[0])
+            {
+                return cast(int) i;
+            }
+        }
+        return -1;
+    }
+
+    /// First child that fits `c`, or null.
+    private Node pick(Constraints c)
+    {
+        foreach (Node o; options)
+        {
+            Fits f = cast(Fits) o;
+            if (f is null || f.holds(c))
+            {
+                return o;
+            }
+        }
+        return null;
+    }
+
+    /// Attaches the child that fits and lays it out.
+    protected override Size performLayout(Constraints c)
+    {
+        Node p = pick(c);
+        if ((children.length > 0 ? children[0] : null) !is p)
+        {
+            setChildren(p is null ? null : [p]);
+            if (p !is null)
+            {
+                // NOTE: the running flush may drop boundaries the attach queued, so lay out all of it.
+                p.markSubtreeNeedsLayout();
+            }
+        }
+        if (p is null)
+        {
+            return Size(c.minW, c.minH);
+        }
+        p.offset = Point.init;
+        return p.layout(c);
+    }
+}
+
+/// Squeeze options, waiting for the children.
+struct SqueezeSpec
+{
+    /// The squeeze picking from `kids`, in order.
+    Squeeze opCall(Node[] kids...)
+    {
+        return new Squeeze(kids.dup);
+    }
+}
+
+/// First child that fits the space: `squeeze()(fits(minW: 800)(wide), fits(minW: 500)(medium), narrow)`.
+SqueezeSpec squeeze()
+{
+    return SqueezeSpec.init;
 }
 
 /// Children on top of each other, the last on top.
@@ -1259,4 +1416,48 @@ unittest
     assert(sv.onPointer(e) == false && sv.scrollY == 0);
     e.pos = Point(199, 90);
     assert(sv.onPointer(e) && sv.scrollY == 100);
+}
+
+// A squeeze shows the first child whose ranges hold the offered size, bounds included, with a plain child as the
+// fallback. The others stay detached and keep their state.
+unittest
+{
+    Node wide = new Fixed(Size(30, 10));
+    Node medium = new Fixed(Size(20, 10));
+    Node narrow = new Fixed(Size(10, 10));
+    Squeeze q = squeeze()(fits(minW: 800)(wide), fits(minW: 500, maxH: 300)(medium), narrow);
+    Sized box = sized(w: 900, h: 200)(q);
+    Tree t = bareTree(stack()(box), Size(1000, 1000));
+    t.flush();
+    assert(q.shown == 0 && wide.tree is t && medium.tree is null && narrow.parent is null);
+    box.w = 800;
+    box.markNeedsLayout();
+    t.flush();
+    assert(q.shown == 0);
+    box.w = 799;
+    box.markNeedsLayout();
+    t.flush();
+    assert(q.shown == 1 && wide.tree is null && medium.tree is t && q.size == Size(799, 200));
+    box.h = 301;
+    box.markNeedsLayout();
+    t.flush();
+    assert(q.shown == 2 && narrow.tree is t && medium.tree is null);
+    box.w = 900;
+    box.markNeedsLayout();
+    t.flush();
+    assert(q.shown == 0 && wide.tree is t && narrow.tree is null);
+}
+
+// A squeeze with nothing that fits is empty, and an unbounded axis counts as infinitely large.
+unittest
+{
+    Node wide = new Fixed(Size(30, 10));
+    Squeeze q = squeeze()(fits(maxW: 400)(new Fixed(Size(10, 10))));
+    Tree t = bareTree(stack()(row()(q)), Size(300, 100));
+    t.flush();
+    assert(q.shown == -1 && q.children.length == 0 && q.size == Size(0, 0));
+    Squeeze r = squeeze()(fits(minW: 5000)(wide));
+    Tree u = bareTree(stack()(row()(r)), Size(300, 100));
+    u.flush();
+    assert(r.shown == 0 && r.size == Size(30, 10));
 }

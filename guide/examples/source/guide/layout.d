@@ -8,6 +8,7 @@ import dentrite.signals;
 import dentrite.widgets.button;
 import dentrite.widgets.icons;
 import dentrite.widgets.label;
+import dentrite.widgets.textbox;
 import std.format : format;
 
 /// Window shell: a tool bar, a sidebar of fixed width, scrolling content and a status bar.
@@ -64,6 +65,15 @@ Node adaptive(Host h, Node side, Node content)
         holder.setChildren(narrow.get ? [main] : [side, rule, main]);
     });
     return holder;
+}
+
+/// Search bar with a caption and a button when given 500 px or more, the text box alone otherwise.
+Node searchBar(Signal!string query)
+{
+    return squeeze()(
+        fits(minW: 500)(row(gap: 6)(label("Search"), expanded(textBox(query)), button("Go"))),
+        textBox(query),
+    );
 }
 
 /// The sidebar keeps its width, the content takes the rest, and the bars stay at the edges.
@@ -156,4 +166,41 @@ unittest
     assert(side.parent is null && content.bounds.x == 0 && content.size.w == 600);
     resize(700);
     assert(side.parent !is null && content.bounds.x > 180);
+}
+
+/// The search bar drops its caption and button below 500 px, focus inside them is dropped, and
+/// the same text box comes back with the text typed meanwhile.
+unittest
+{
+    import dentrite.access : Role;
+    import dentrite.headless : HeadlessPlatform;
+    import dentrite.platform : Event, EventKind, Metrics;
+    import guide.harness;
+
+    Host h = testHost(600, 100);
+    scope (exit)
+    {
+        h.close();
+    }
+    void resize(int w)
+    {
+        (cast(HeadlessPlatform) h.platform).size = Metrics(w, 100, 1);
+        Event e = Event(EventKind.resized);
+        h.handle(e);
+        h.frame();
+    }
+
+    Signal!string query = signal("");
+    scope Scope s = effectScope(() { h.setRoot(searchBar(query)); });
+    h.frame();
+    TextBox wide = cast(TextBox) h.tree.content.children[0].children[0].children[1].children[0];
+    h.setFocus(wide);
+    assert(h.shows(Role.button, "Go"));
+    resize(499);
+    assert(h.shows(Role.button, "Go") == false);
+    assert(h.focused is null);
+    query.set("dentrite");
+    resize(500);
+    assert(h.shows(Role.button, "Go"));
+    assert(h.tree.content.children[0].children[0].children[1].children[0] is wide && wide.text == "dentrite");
 }

@@ -163,7 +163,32 @@ Node adaptive(Host h, Node side, Node content)
 ```
 
 Breakpoints follow the window, not the space a node gets, such as a pane
-the user resized in a dock.
+the user resized in a dock. For that, use a squeeze.
+
+## Space a node gets
+
+`squeeze()(...)` shows the first child that fits the space it is offered.
+`fits(minW:, maxW:, minH:, maxH:)` gives a child ranges in logical pixels,
+bounds included, and a child without it always fits, so the last is the
+fallback:
+
+<!-- src="examples/source/guide/layout.d" from="Node searchBar(" -->
+```d
+/// Search bar with a caption and a button when given 500 px or more, the text box alone otherwise.
+Node searchBar(Signal!string query)
+{
+    return squeeze()(
+        fits(minW: 500)(row(gap: 6)(label("Search"), expanded(textBox(query)), button("Go"))),
+        textBox(query),
+    );
+}
+```
+
+The pick happens during layout, from the largest size offered. An
+unbounded axis, such as the width in a plain `row`, counts as infinitely
+large, so give the squeeze `expanded` or `sized` there. The children not
+shown stay built and detached, like the pages of `tabs`, so they keep their
+state. Focus inside a child that leaves is dropped.
 
 ## Other layouts
 

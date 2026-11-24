@@ -111,6 +111,7 @@ Page[] pages(Gallery g)
         Page("Layout", "Rows, columns, padding, panels, separators, flex and scrolling.", () => layoutPage()),
         Page("Grids and stacks", "Cells in rows of equal columns, and children on top of each other.",
             () => gridsPage()),
+        Page("Adaptive", "Layouts that change with the window size or the space they get.", () => adaptivePage(g)),
         Page("Dock", "Tab stacks and splits. Drag tabs to dock or float them.", () => dockPage()),
         Page("Islands", "Immediate-mode code on the same layout and renderer.", () => islandsPage()),
     ];
@@ -747,6 +748,46 @@ Node gridsPage()
         )),
     );
 }
+/// Window breakpoint, and a squeeze picking a player bar by the width a slider sets.
+Node adaptivePage(Gallery g)
+{
+    Computed!bool narrowWindow = g.host.breakpoint(maxW: 900);
+    Signal!float width = signal(640f);
+    Sized box = sized(w: width.peek)(panel(variant: "toolbar")(squeeze()(
+        fits(minW: 560)(row(gap: 6)(
+            button("Play", icon: Icon.play, variant: "toolbar"),
+            button("Pause", icon: Icon.pause, variant: "toolbar"),
+            button("Stop", icon: Icon.stop, variant: "toolbar"),
+            spacer(),
+            label("Track 3 of 12: Night Drive", "muted"),
+        )),
+        fits(minW: 300)(row(gap: 6)(
+            button("", icon: Icon.play, variant: "toolbar", accessName: "Play"),
+            button("", icon: Icon.pause, variant: "toolbar", accessName: "Pause"),
+            button("", icon: Icon.stop, variant: "toolbar", accessName: "Stop"),
+            spacer(),
+            label("Track 3 of 12", "muted"),
+        )),
+        row(gap: 6)(button("", icon: Icon.play, variant: "toolbar", accessName: "Play"), label("3/12", "muted")),
+    )));
+    effect(() {
+        box.w = width.get;
+        box.markNeedsLayout();
+    });
+    return column(gap: 22)(
+        section("Window breakpoint", column(gap: 6, cross: CrossAlign.start)(
+            label("True while the window is at most 900 px wide. Resize the window.", "muted"),
+            label(() => narrowWindow.get ? "Narrow window" : "Wide window", "accent"),
+        )),
+        section("Squeeze", column(gap: 6, cross: CrossAlign.start)(
+            label("Shows the first bar that fits its width: 560 px and up, 300 px and up, else the last.", "muted"),
+            row(gap: 10)(label("Width"), sized(w: 240)(slider(width, 200f, 800f, 10f, accessName: "Width")),
+                label(() => format("%.0f px", width.get), "muted")),
+            box,
+        )),
+    );
+}
+
 /// Dock view with four panes.
 Node dockPage()
 {
