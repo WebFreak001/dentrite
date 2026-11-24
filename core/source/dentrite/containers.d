@@ -1,5 +1,5 @@
-/// Layout containers: rows, columns, grids, stacks, padding, panels, fixed sizes, a vertical scroll view
-/// and a squeeze picking a child by the space it gets.
+/// Layout containers: rows, columns, grids, stacks, padding, panels, fixed sizes, a vertical scroll view,
+/// a width cap and a squeeze picking a child by the space it gets.
 ///
 /// Builders take options by name in one call and children in a second call:
 /// `row(gap: 4)(a, b)`. One call would bind a positional child after a named
@@ -451,6 +451,54 @@ GridSpec grid(int cols = 0, float minCell = 0, float gap = 0, CrossAlign cross =
 {
     assert(cols > 0 || minCell > 0, "grid needs cols or minCell");
     return GridSpec(cols, minCell, gap, cross);
+}
+
+/// Child at most `maxW` wide, centered in the width it gets, such as a form kept narrow in a wide window.
+final class Clamped : Node
+{
+    float maxW; /// widest the child gets
+
+    /// Caps `child` at `maxW`.
+    this(float maxW, Node child)
+    {
+        this.maxW = maxW;
+        add(child);
+    }
+
+    /// Lays out the child at most `maxW` wide and centers it. Takes the full width unless unbounded.
+    protected override Size performLayout(Constraints c)
+    {
+        Node child = children[0];
+        float cap = min(maxW, c.maxW);
+        Size s = child.layout(Constraints(min(c.minW, cap), cap, c.minH, c.maxH));
+        float w = isInfinity(c.maxW) ? max(c.minW, s.w) : c.maxW;
+        child.offset = Point(round((w - s.w) / 2), 0);
+        return Size(w, s.h);
+    }
+}
+
+/// Width cap, waiting for the child.
+struct ClampedSpec
+{
+    float maxW; /// widest the child gets
+
+    /// Stores the cap. Needed because `opCall` hides the struct literal.
+    this(float maxW)
+    {
+        this.maxW = maxW;
+    }
+
+    /// The centered child.
+    Clamped opCall(Node child)
+    {
+        return new Clamped(maxW, child);
+    }
+}
+
+/// Child at most `maxW` wide, centered: `clamped(maxW: 640)(form)`.
+ClampedSpec clamped(float maxW)
+{
+    return ClampedSpec(maxW);
 }
 
 /// Child of a squeeze, shown while the space offered holds its ranges. Elsewhere it passes the space through.
@@ -1460,4 +1508,18 @@ unittest
     Tree u = bareTree(stack()(row()(r)), Size(300, 100));
     u.flush();
     assert(r.shown == 0 && r.size == Size(30, 10));
+}
+
+// A clamped child gets at most its cap and is centered, and gets the full width below the cap.
+unittest
+{
+    Clamped k = clamped(maxW: 400)(new Fixed(Size(1000, 20)));
+    Sized box = sized(w: 1000)(k);
+    Tree t = bareTree(stack()(box), Size(1200, 100));
+    t.flush();
+    assert(k.size == Size(1000, 20) && k.children[0].size.w == 400 && k.children[0].offset.x == 300);
+    box.w = 300;
+    box.markNeedsLayout();
+    t.flush();
+    assert(k.size.w == 300 && k.children[0].size.w == 300 && k.children[0].offset.x == 0);
 }

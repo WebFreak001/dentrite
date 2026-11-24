@@ -14,6 +14,8 @@ Why:
 
 - Retained node tree driven by signals.
 - Immediate-mode islands on the same layout and renderer.
+- Responsive layouts: window breakpoints, a squeeze picking a child by
+  the space it gets, split views and width caps.
 - Raw GL islands for custom drawing.
 - SDL3 window, OpenGL 3.3 or software renderer.
 - FreeType and HarfBuzz text.

@@ -190,6 +190,37 @@ large, so give the squeeze `expanded` or `sized` there. The children not
 shown stay built and detached, like the pages of `tabs`, so they keep their
 state. Focus inside a child that leaves is dropped.
 
+## Split views and width caps
+
+`splitView(sideShown, minW:, sideW:, mode:)(side, content)` shows a
+sidebar `sideW` wide beside the content while it gets at least `minW`, and
+collapses when narrower. With `Collapse.navigate`, the default, it shows
+the sidebar or the content, with a back bar over the content. With
+`Collapse.drawer` it shows the content, and the sidebar opens over it as a
+drawer that a press outside or Escape closes. `sideShown` picks what shows
+while collapsed, so the app sets it when a sidebar item is chosen:
+
+<!-- src="examples/source/guide/layout.d" from="Node mail(" -->
+```d
+/// Folders beside the open folder, one at a time below 500 px. Choosing a folder shows it when collapsed.
+Node mail(Signal!string folder)
+{
+    Signal!bool shown = signal(true);
+    Node side = column(cross: CrossAlign.start)(
+        button("Inbox", () { folder.set("Inbox"); shown.set(false); }),
+        button("Sent", () { folder.set("Sent"); shown.set(false); }),
+    );
+    Node content = pad(all: 12)(label(() => folder.get));
+    return splitView(shown, minW: 500, sideW: 160)(side, content);
+}
+```
+
+`collapsed:` takes a signal that follows whether it collapsed, set after
+each layout, such as to show a button opening the drawer only then.
+
+`clamped(maxW: 640)(child)` keeps a child at most that wide, centered in
+a wider space, such as a form or long text in a wide window.
+
 ## Other layouts
 
 The dock (`dentrite.dock`) arranges panes in tab stacks and splits that the

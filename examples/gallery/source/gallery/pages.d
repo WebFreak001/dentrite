@@ -31,6 +31,7 @@ import dentrite.widgets.progress;
 import dentrite.widgets.radio;
 import dentrite.widgets.slider;
 import dentrite.widgets.spinbox;
+import dentrite.widgets.splitview;
 import dentrite.widgets.table;
 import dentrite.widgets.tabs;
 import dentrite.widgets.textarea;
@@ -748,12 +749,12 @@ Node gridsPage()
         )),
     );
 }
-/// Window breakpoint, and a squeeze picking a player bar by the width a slider sets.
+/// Window breakpoint, and a squeeze, split views and a width cap at the width a slider sets.
 Node adaptivePage(Gallery g)
 {
     Computed!bool narrowWindow = g.host.breakpoint(maxW: 900);
     Signal!float width = signal(640f);
-    Sized box = sized(w: width.peek)(panel(variant: "toolbar")(squeeze()(
+    Node bar = panel(variant: "toolbar")(squeeze()(
         fits(minW: 560)(row(gap: 6)(
             button("Play", icon: Icon.play, variant: "toolbar"),
             button("Pause", icon: Icon.pause, variant: "toolbar"),
@@ -769,23 +770,92 @@ Node adaptivePage(Gallery g)
             label("Track 3 of 12", "muted"),
         )),
         row(gap: 6)(button("", icon: Icon.play, variant: "toolbar", accessName: "Play"), label("3/12", "muted")),
-    )));
-    effect(() {
-        box.w = width.get;
-        box.markNeedsLayout();
-    });
+    ));
     return column(gap: 22)(
         section("Window breakpoint", column(gap: 6, cross: CrossAlign.start)(
             label("True while the window is at most 900 px wide. Resize the window.", "muted"),
             label(() => narrowWindow.get ? "Narrow window" : "Wide window", "accent"),
         )),
-        section("Squeeze", column(gap: 6, cross: CrossAlign.start)(
-            label("Shows the first bar that fits its width: 560 px and up, 300 px and up, else the last.", "muted"),
+        column(gap: 6, cross: CrossAlign.start)(
+            label("The examples below take the width this slider sets.", "muted"),
             row(gap: 10)(label("Width"), sized(w: 240)(slider(width, 200f, 800f, 10f, accessName: "Width")),
                 label(() => format("%.0f px", width.get), "muted")),
-            box,
+        ),
+        section("Squeeze", column(gap: 6, cross: CrossAlign.start)(
+            label("The first bar that fits: 560 px and up, 300 px and up, else the last.", "muted"),
+            atWidth(width, bar),
+        )),
+        section("Split view, navigating", column(gap: 6, cross: CrossAlign.start)(
+            label("Below 500 px, one side at a time. Pick a folder, then go back.", "muted"),
+            atWidth(width, sized(h: 200)(mailSplit())),
+        )),
+        section("Split view, drawer", column(gap: 6, cross: CrossAlign.start)(
+            label("Below 500 px, the sidebar opens over the content from the menu button.", "muted"),
+            atWidth(width, sized(h: 200)(drawerSplit())),
+        )),
+        section("Width cap", column(gap: 6, cross: CrossAlign.start)(
+            label("At most 360 px wide, centered.", "muted"),
+            atWidth(width, panel(variant: "pane")(pad(y: 8)(clamped(maxW: 360)(label(
+                "Long text reads better in a narrow column. The cap keeps it narrow in a wide space and lets it "
+                ~ "shrink with a narrow one.", wrap: true))))),
         )),
     );
+}
+
+/// `n` as wide as `width` says.
+private Node atWidth(Signal!float width, Node n)
+{
+    Sized box = sized(w: width.peek)(n);
+    effect(() {
+        box.w = width.get;
+        box.markNeedsLayout();
+    });
+    return box;
+}
+
+/// Folders beside the open folder, one at a time when narrow.
+private Node mailSplit()
+{
+    Signal!string folder = signal("Inbox");
+    Signal!bool shown = signal(true);
+    Node[] items;
+    foreach (string f; ["Inbox", "Sent", "Drafts"])
+    {
+        items ~= folderButton(f, folder, shown);
+    }
+    Node side = panel(variant: "pane")(pad(all: 6)(column(gap: 2, cross: CrossAlign.start)(items)));
+    Node content = pad(x: 14, y: 10)(column(gap: 6)(
+        label(() => folder.get, "strong"),
+        label(() => format("Messages in %s would list here.", folder.get), "muted"),
+    ));
+    return splitView(shown, minW: 500, sideW: 160)(side, content);
+}
+
+/// Button opening folder `f` and showing it when collapsed.
+private Node folderButton(string f, Signal!string folder, Signal!bool shown)
+{
+    return button(f, () {
+        folder.set(f);
+        shown.set(false);
+    }, variant: "toolbar");
+}
+
+/// Sidebar as a drawer when narrow, opened by a menu button shown only then.
+private Node drawerSplit()
+{
+    Signal!bool open = signal(false);
+    Signal!bool folded = signal(false);
+    Node toggle = button("", () { open.set(true); }, icon: Icon.menu, variant: "toolbar", accessName: "Sidebar");
+    Flex head = row(gap: 6)();
+    Node title = label("Document", "strong");
+    effect(() {
+        bool f = folded.get;
+        head.setChildren(f ? [toggle, title] : [title]);
+    });
+    Node side = panel(variant: "pane")(pad(x: 10, y: 8)(column(gap: 4)(
+        label("Outline", "strong"), label("Introduction"), label("Usage"), label("Limits"))));
+    Node content = column()(panel(variant: "toolbar")(head), pad(x: 14, y: 10)(label("Body text.", "muted")));
+    return splitView(open, minW: 500, sideW: 180, mode: Collapse.drawer, collapsed: folded)(side, content);
 }
 
 /// Dock view with four panes.

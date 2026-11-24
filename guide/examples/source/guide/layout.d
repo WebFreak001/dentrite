@@ -8,6 +8,7 @@ import dentrite.signals;
 import dentrite.widgets.button;
 import dentrite.widgets.icons;
 import dentrite.widgets.label;
+import dentrite.widgets.splitview;
 import dentrite.widgets.textbox;
 import std.format : format;
 
@@ -74,6 +75,18 @@ Node searchBar(Signal!string query)
         fits(minW: 500)(row(gap: 6)(label("Search"), expanded(textBox(query)), button("Go"))),
         textBox(query),
     );
+}
+
+/// Folders beside the open folder, one at a time below 500 px. Choosing a folder shows it when collapsed.
+Node mail(Signal!string folder)
+{
+    Signal!bool shown = signal(true);
+    Node side = column(cross: CrossAlign.start)(
+        button("Inbox", () { folder.set("Inbox"); shown.set(false); }),
+        button("Sent", () { folder.set("Sent"); shown.set(false); }),
+    );
+    Node content = pad(all: 12)(label(() => folder.get));
+    return splitView(shown, minW: 500, sideW: 160)(side, content);
 }
 
 /// The sidebar keeps its width, the content takes the rest, and the bars stay at the edges.
@@ -203,4 +216,34 @@ unittest
     resize(500);
     assert(h.shows(Role.button, "Go"));
     assert(h.tree.content.children[0].children[0].children[1].children[0] is wide && wide.text == "dentrite");
+}
+
+/// Below 500 px the folders show alone, choosing one shows it with a back button, and the back button returns.
+unittest
+{
+    import dentrite.access : Role;
+    import dentrite.headless : HeadlessPlatform;
+    import dentrite.platform : Event, EventKind, Metrics;
+    import guide.harness;
+
+    Host h = testHost(600, 300);
+    scope (exit)
+    {
+        h.close();
+    }
+    Signal!string folder = signal("Inbox");
+    scope Scope s = effectScope(() { h.setRoot(mail(folder)); });
+    h.frame();
+    assert(h.shows(Role.button, "Sent") && h.shows(Role.label, "Inbox"));
+    (cast(HeadlessPlatform) h.platform).size = Metrics(400, 300, 1);
+    Event e = Event(EventKind.resized);
+    h.handle(e);
+    h.frame();
+    assert(h.shows(Role.button, "Sent") && h.shows(Role.label, "Inbox") == false);
+    h.click(Role.button, "Sent");
+    h.frame();
+    assert(folder.peek == "Sent" && h.shows(Role.button, "Back") && h.shows(Role.button, "Sent") == false);
+    h.click(Role.button, "Back");
+    h.frame();
+    assert(h.shows(Role.button, "Sent"));
 }
