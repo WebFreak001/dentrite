@@ -354,6 +354,7 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl, T
     private FileRequest[] requests; /// file dialogs not answered or not handed out yet
     private bool logInput;          /// DENTRITE_LOG_INPUT is set, so input events go to stderr
     private DeadKeys deadKeys;      /// dead key accents on Wayland, null elsewhere
+    private bool wayland;           /// SDL runs on Wayland
     private bool textOn;            /// text input started
     private bool textHidden;        /// text input started for a password
     private bool deadShown;         /// a dead key's accent is shown as composition
@@ -363,6 +364,8 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl, T
     private float forced = 0;       /// `WindowOptions.scale`, 0 for the display's own
     private SdlTray[] trays;        /// tray icons open
     private SdlPopup[] popups;      /// popup windows open, parents before their children
+    private SDL_Event[] ahead;      /// queued events `dropRepeatBurst` looks at
+    private ulong pressedAt;        /// SDL time the last key press without repeat came in
 
     /// Opens the window and sets up the renderer `o.renderer` names.
     this(WindowOptions o)
@@ -426,7 +429,8 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl, T
         setMinimumSize(o.minWidth, o.minHeight);
         readSizes();
         setWaker(&wakeSdl);
-        if (fromStringz(SDL_GetCurrentVideoDriver()) == "wayland")
+        wayland = fromStringz(SDL_GetCurrentVideoDriver()) == "wayland";
+        if (wayland)
         {
             deadKeys = DeadKeys.open(SDL_GetPointerProperty(SDL_GetWindowProperties(win),
                 "SDL.window.wayland.display", null));
@@ -549,6 +553,11 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl, T
         {
             return false;
         }
+        if (dropRepeatBurst(s))
+        {
+            e = Event.init;
+            return true;
+        }
         if (onSdlEvent !is null)
         {
             onSdlEvent(s);
@@ -585,6 +594,62 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl, T
             {
                 return true;
             }
+        }
+    }
+
+    /// Drops `s` and the queued events after it when `s` starts a burst of stale key repeats and their text
+    /// that ends with the key's release, which stays queued. True if dropped.
+    /// HACK: for fcitx5 on Hyprland. fcitx5 repeats a held key itself, as a release and a press each time,
+    /// all stamped with the time of the first press. On the real release, SDL's Wayland backend sends every
+    /// repeat due since that time, so the text doubles. Those repeats are stamped before the last press came
+    /// in, which real ones never are. Remove once fcitx5 or SDL fixes it.
+    private bool dropRepeatBurst(ref const SDL_Event s)
+    {
+        if (s.type == SDL_EventType.keyDown && s.key.repeat == false)
+        {
+            pressedAt = SDL_GetTicksNS();
+        }
+        if (wayland == false || s.type != SDL_EventType.keyDown || s.key.repeat == false
+            || s.key.timestamp >= pressedAt)
+        {
+            return false;
+        }
+        if (ahead.length == 0)
+        {
+            ahead.length = 256;
+        }
+        while (true)
+        {
+            int n = SDL_PeepEvents(ahead.ptr, cast(int) ahead.length, SDL_EventAction.peek,
+                SDL_EventType.keyDown, SDL_EventType.textInput);
+            foreach (int i; 0 .. n)
+            {
+                const(SDL_Event)* a = &ahead[i];
+                if (a.type == SDL_EventType.textInput)
+                {
+                    continue;
+                }
+                bool sameKey = (a.type == SDL_EventType.keyDown || a.type == SDL_EventType.keyUp)
+                    && a.key.scancode == s.key.scancode;
+                if (sameKey == false || (a.type == SDL_EventType.keyDown && a.key.repeat == false))
+                {
+                    return false;
+                }
+                if (a.type == SDL_EventType.keyUp)
+                {
+                    SDL_PeepEvents(ahead.ptr, i, SDL_EventAction.get, SDL_EventType.keyDown, SDL_EventType.textInput);
+                    if (logInput)
+                    {
+                        stderr.writefln("dentrite: dropped a burst of %d repeat events before a key up", i + 1);
+                    }
+                    return true;
+                }
+            }
+            if (n < ahead.length || ahead.length >= 16_384)
+            {
+                return false;
+            }
+            ahead.length *= 2;
         }
     }
 
