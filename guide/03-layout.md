@@ -72,9 +72,11 @@ Touch and pen drags on the content scroll it, and a quick release flings it
 on. Scroll views, tables and text areas all do this. A press waits until
 it moves (scroll) or lifts (tap), so a swipe never presses a button or
 selects a row. `WindowOptions.scrollDrag` picks the pointers for the whole
-window: `ScrollDrag.always` adds the mouse, for a VR laser pointer fed in as
-mouse input, and `never` turns dragging off. `scroll(drag:)` overrides it
-for one view. The distances and times are in the theme's `[scroll]` section.
+window, and `Host.scrollDrag` changes them later. `ScrollDrag.always` adds
+the mouse, for a VR overlay that drives the mouse cursor, and `never` turns
+dragging off. With the mouse, a press held still for a moment keeps its
+drag, so text can still be selected. `scroll(drag:)` overrides it for one
+view. The distances and times are in the theme's `[scroll]` section.
 
 ## Sharing space
 

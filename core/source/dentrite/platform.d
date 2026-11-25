@@ -50,7 +50,8 @@ struct WindowOptions
     /// windows keep popups inside.
     bool popupWindows = true;
     /// Pointers that scroll a view by dragging its content, for views left at `ScrollDrag.inherit`. Set `always`
-    /// for a pointer that cannot tell the platform it is not a mouse.
+    /// for a pointer that cannot tell the platform it is not a mouse, such as a VR overlay. See `Host.scrollDrag`
+    /// to change it later.
     ScrollDrag scrollDrag = ScrollDrag.touch;
 }
 

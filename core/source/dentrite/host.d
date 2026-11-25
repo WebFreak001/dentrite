@@ -437,6 +437,7 @@ class Host : Services
         if (holding && frameTime - held.time >= usecs(cast(long) (tree.style!ScrollStyle().pressDelay * 1000)))
         {
             holding = false;
+            mayTake = held.source != PointerSource.mouse;
             deliverPress(held);
         }
         tooltips.tick(frameTime);
@@ -1438,6 +1439,19 @@ class Host : Services
         requestFrame();
     }
 
+    /// Pointers that scroll views left at `ScrollDrag.inherit` by dragging their content.
+    ScrollDrag scrollDrag()
+    {
+        return tree.scrollDrag;
+    }
+
+    /// Sets the pointers that drag views left at `inherit`, at any time: `always` while a VR overlay drives the
+    /// mouse, `touch` after. Starts as `WindowOptions.scrollDrag`.
+    void scrollDrag(ScrollDrag mode)
+    {
+        tree.scrollDrag = mode;
+    }
+
     /// True unless the window is hidden, always true when the platform cannot hide it.
     bool visible()
     {
@@ -1796,7 +1810,7 @@ unittest
 }
 
 // A touch swipe on a button in a scroll view scrolls from where it passed `dragStart` without pressing the button,
-// a tap clicks it, and the mouse drags only with `ScrollDrag.always`.
+// a tap clicks it, and the mouse drags only with `ScrollDrag.always`, unless held still first.
 unittest
 {
     import core.time : msecs;
@@ -1853,6 +1867,16 @@ unittest
     h.inject(PointerKind.move, Point(50, 10));
     h.inject(PointerKind.up, Point(50, 10));
     assert(sv.scrollY == 32 + 40 - 8 && clicks == 1);
+
+    sv.drag = ScrollDrag.inherit;
+    h.scrollDrag = ScrollDrag.always;
+    MonoTime past = MonoTime.currTime - 1000.msecs;
+    h.inject(PointerKind.down, Point(50, 50), 1, 1, 0, PointerSource.mouse, past);
+    h.frame();
+    assert(h.captureNode !is sv && h.captureNode.pressed, "delivered after the delay");
+    h.inject(PointerKind.move, Point(50, 10));
+    assert(sv.scrollY == 64 && h.captureNode !is sv, "a mouse press held still keeps its drag");
+    h.inject(PointerKind.up, Point(50, 10));
 }
 
 // A touch press held past `pressDelay` reaches the button, a drag after it cancels the press and scrolls. A quick

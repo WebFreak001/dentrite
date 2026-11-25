@@ -136,6 +136,7 @@ bool scrollsWith(ScrollDrag mode, PointerSource source)
 /// Node scrolled by dragging its content, such as a scroll view on a touch screen. The window holds back a press
 /// inside one until the pointer moves, lifts or `ScrollStyle.pressDelay` passes, so a swipe never presses a control.
 /// Once the pointer moves `ScrollStyle.dragStart`, the innermost one that can scroll that way takes the drag.
+/// A mouse press held still until it reaches the control keeps its drag, so text can still be selected.
 interface DragScroller
 {
     /// True if a drag by `source` from window point `at` may scroll it. Sets `onBar` when `at` is on its scroll
