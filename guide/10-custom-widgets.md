@@ -210,7 +210,11 @@ What each part is for:
 - `paint(ctx, origin)` draws at `origin`. The default paints the children.
 - `onPointer` gets `enter`, `move`, `leave`, `down` and `up`. Positions are
   in window coordinates, `bounds` gives the node's own rect. A node that
-  saw the press gets the moves and the release.
+  saw the press gets the moves and the release. Inside a view that scrolls
+  by dragging, a touch press arrives late, and a drag that starts after it
+  sends `cancel` and no release: undo what the press started there. A node
+  that drags itself, such as a canvas, sets `drags` so its presses are not
+  held back and drags its way stay with it.
 - `onKey` gets keys while focused. Return false for keys you do not use,
   so they reach the parents and the window's shortcuts.
 - `focusRing` is true when focus came from the keyboard, the time to draw a

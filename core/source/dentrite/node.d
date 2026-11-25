@@ -72,21 +72,82 @@ enum Key : uint
 /// Pointer event kinds.
 enum PointerKind
 {
-    move,  /// moved, or dragged while captured
-    down,  /// button pressed
-    up,    /// button released, sent to the node that saw the press
-    enter, /// became the hovered node
-    leave, /// stopped being the hovered node
+    move,   /// moved, or dragged while captured
+    down,   /// button pressed
+    up,     /// button released, sent to the node that saw the press
+    enter,  /// became the hovered node
+    leave,  /// stopped being the hovered node
+    cancel, /// the press was taken by a drag that scrolls, no release follows. Undo what the press started
+}
+
+/// Device behind a pointer event.
+enum PointerSource : ubyte
+{
+    mouse, /// mouse or touchpad
+    touch, /// finger on a touch screen
+    pen,   /// pen or stylus
 }
 
 /// Pointer event in window coordinates.
 struct PointerEvent
 {
-    PointerKind kind; /// kind of pointer event
-    Point pos;        /// window position
-    ubyte button;     /// 1 left, 2 middle, 3 right
-    ubyte clicks;     /// 2 for a double click
-    ubyte mods;       /// `Mod` flags, combined with `|`
+    PointerKind kind;     /// kind of pointer event
+    Point pos;            /// window position
+    ubyte button;         /// 1 left, 2 middle, 3 right
+    ubyte clicks;         /// 2 for a double click
+    ubyte mods;           /// `Mod` flags, combined with `|`
+    PointerSource source; /// device it came from
+    MonoTime time;        /// when it happened, set by the window
+}
+
+/// Drag directions, see `Node.drags`.
+enum DragAxes : ubyte
+{
+    none = 0,       /// no direction
+    horizontal = 1, /// sideways
+    vertical = 2,   /// up and down
+    both = 3,       /// every direction
+}
+
+/// Which pointers scroll a view by dragging its content, see `DragScroller`.
+enum ScrollDrag : ubyte
+{
+    inherit, /// the window's choice, `WindowOptions.scrollDrag`
+    touch,   /// touch and pen, the window default
+    always,  /// the mouse too, as for a VR laser pointer injected as mouse input
+    never,   /// none, only the scroll bars and the wheel
+}
+
+/// True if `mode` lets a drag by `source` scroll. `inherit` reads as `touch`.
+bool scrollsWith(ScrollDrag mode, PointerSource source)
+{
+    final switch (mode)
+    {
+    case ScrollDrag.inherit:
+    case ScrollDrag.touch:
+        return source != PointerSource.mouse;
+    case ScrollDrag.always:
+        return true;
+    case ScrollDrag.never:
+        return false;
+    }
+}
+
+/// Node scrolled by dragging its content, such as a scroll view on a touch screen. The window holds back a press
+/// inside one until the pointer moves, lifts or `ScrollStyle.pressDelay` passes, so a swipe never presses a control.
+/// Once the pointer moves `ScrollStyle.dragStart`, the innermost one that can scroll that way takes the drag.
+interface DragScroller
+{
+    /// True if a drag by `source` from window point `at` may scroll it. Sets `onBar` when `at` is on its scroll
+    /// bars, where no view takes the drag.
+    bool scrollsDrag(PointerSource source, Point at, out bool onBar);
+
+    /// Takes a drag that moved `moved` since the press if it can scroll that way, or along that axis at all when
+    /// `edge` is set. From then on it gets the moves and the release, from window point `at`. True if taken.
+    bool takeDrag(Point at, Point moved, bool edge, MonoTime time);
+
+    /// Stops a fling. True if one was running: it then holds the press at `at` as a taken drag.
+    bool catchFling(Point at, MonoTime time);
 }
 
 /// Wheel event: scroll distance in logical pixels, positive `dy` moves content up.
@@ -262,6 +323,7 @@ final class Tree
     int boundaryLayouts;  /// relayout boundaries laid out in the last flush
     uint styleVersion;    /// bumped by `restyle`, for nodes caching measurements
     bool frameStart;      /// set by the host around frame-start hooks, where paint requests need no new frame
+    ScrollDrag scrollDrag = ScrollDrag.touch; /// `WindowOptions.scrollDrag`, for drag scrollers left at `inherit`
 
     private Node[] dirty;  /// boundaries marked since the last flush
     private bool flushing; /// inside `flush`, where paint requests need no new frame
@@ -565,6 +627,9 @@ abstract class Node
     bool textInput;      /// wants text input events while focused
     bool hiddenText;     /// its text input is a password, so the platform keeps input methods off where it can
     CursorShape cursor;  /// cursor shape while hovered
+    /// Drag directions it uses itself, such as a canvas. A press on it is not held back for a `DragScroller`,
+    /// which can still take drags the other way.
+    DragAxes drags;
     bool hovered;        /// pointer is over it, set by the window
     bool pressed;        /// pointer pressed on it and not released yet, set by the window
     bool focused;        /// has keyboard focus, set by the window

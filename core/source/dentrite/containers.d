@@ -6,10 +6,11 @@
 /// option to the next parameter.
 module dentrite.containers;
 
+import core.time : Duration, MonoTime, msecs;
 import dentrite.draw;
 import dentrite.node;
 import std.algorithm.comparison : clamp, max, min;
-import std.math : floor, isInfinity, round;
+import std.math : abs, exp, floor, hypot, isInfinity, isNaN, log, round;
 
 /// Main axis of a flex container.
 enum Axis
@@ -1003,6 +1004,145 @@ struct ScrollStyle
     float width = 8;     /// bar width
     float minThumb = 24; /// shortest thumb length
     float wheelStep = 48; /// distance per wheel notch
+    float dragStart = 8;  /// distance a press moves before a drag scrolls, see `DragScroller`
+    float pressDelay = 120; /// milliseconds a press in a view scrolled by dragging waits before reaching the control
+    float flingDecay = 325; /// milliseconds for a fling to slow to a third of its speed
+    float flingMin = 50;  /// slowest fling, in logical pixels per second
+}
+
+/// Content dragged by a pointer, then coasting after a quick release and slowing down, for the views that scroll
+/// by dragging. Distances are scroll distances, the opposite of the pointer's.
+struct Fling
+{
+    enum float maxSpeed = 8000; /// fastest fling, in logical pixels per second
+    enum Duration window = 100.msecs; /// span of pointer moves the release speed is taken over
+
+    bool held;      /// a pointer is dragging the content
+    Point velocity; /// coasting speed in logical pixels per second
+
+    private Point last;       /// pointer at the last move
+    private MonoTime stepped; /// time of the last coast step
+    private Point[8] at;      /// recent pointer positions, a ring
+    private MonoTime[8] when; /// times of `at`
+    private size_t taken;     /// positions taken since the grab
+
+    /// True while coasting.
+    bool coasting() const
+    {
+        return held == false && (velocity.x != 0 || velocity.y != 0);
+    }
+
+    /// Follows the pointer from `p` at `t`, stopping a coast.
+    void grab(Point p, MonoTime t)
+    {
+        held = true;
+        velocity = Point(0, 0);
+        last = p;
+        taken = 0;
+        sample(p, t);
+    }
+
+    /// Scroll distance for a pointer move to `p` at `t`.
+    Point drag(Point p, MonoTime t)
+    {
+        Point d = last - p;
+        last = p;
+        sample(p, t);
+        return d;
+    }
+
+    /// Lets go at `p` and `t`. Coasts at the pointer speed over the last `window` when that is `minSpeed` or more,
+    /// true if it does.
+    bool release(Point p, MonoTime t, float minSpeed)
+    {
+        held = false;
+        sample(p, t);
+        size_t newest = (taken - 1) % at.length;
+        size_t oldest = newest;
+        foreach (size_t back; 1 .. min(taken, at.length))
+        {
+            size_t i = (taken - 1 - back) % at.length;
+            if (t - when[i] > window)
+            {
+                break;
+            }
+            oldest = i;
+        }
+        float dt = (when[newest] - when[oldest]).total!"usecs" / 1e6f;
+        velocity = Point(0, 0);
+        if (dt > 0)
+        {
+            velocity = Point((at[oldest].x - at[newest].x) / dt, (at[oldest].y - at[newest].y) / dt);
+        }
+        float speed = hypot(velocity.x, velocity.y);
+        if (speed < minSpeed || isNaN(speed))
+        {
+            velocity = Point(0, 0);
+            return false;
+        }
+        if (speed > maxSpeed)
+        {
+            velocity = Point(velocity.x * maxSpeed / speed, velocity.y * maxSpeed / speed);
+        }
+        stepped = t;
+        return true;
+    }
+
+    /// Coast distance from the last step to `now`, slowing so the speed falls to a third in `decay` milliseconds.
+    /// Stops below `minSpeed`.
+    Point coast(MonoTime now, float decay, float minSpeed)
+    {
+        float dt = (now - stepped).total!"usecs" / 1e6f;
+        if (dt <= 0)
+        {
+            return Point(0, 0);
+        }
+        stepped = now;
+        float tau = decay / 1000 / log(3f);
+        float k = exp(-dt / tau);
+        Point d = Point(velocity.x * tau * (1 - k), velocity.y * tau * (1 - k));
+        velocity = Point(velocity.x * k, velocity.y * k);
+        if (hypot(velocity.x, velocity.y) < minSpeed)
+        {
+            velocity = Point(0, 0);
+        }
+        return d;
+    }
+
+    /// Stops coasting.
+    void stop()
+    {
+        held = false;
+        velocity = Point(0, 0);
+    }
+
+    /// Stops a coast and follows the pointer from `p` at `t`. True if it was coasting.
+    bool catchAt(Point p, MonoTime t)
+    {
+        if (coasting == false)
+        {
+            return false;
+        }
+        grab(p, t);
+        return true;
+    }
+
+    /// Runs `step` for `owner` on the next frame while coasting.
+    void next(Node owner, void delegate() step)
+    {
+        if (coasting && owner.tree !is null && owner.tree.services !is null)
+        {
+            owner.tree.callAt(owner, owner.tree.services.now, step);
+        }
+    }
+
+    /// Adds pointer position `p` at `t` to the ring.
+    private void sample(Point p, MonoTime t)
+    {
+        at[taken % at.length] = p;
+        when[taken % at.length] = t;
+        ++taken;
+    }
 }
 
 /// Child of a ScrollView that lays out only the part in view, such as a virtual list.
@@ -1016,11 +1156,13 @@ interface ViewportAware
 }
 
 /// Vertical scroll view over one child as tall as it wants.
-final class ScrollView : Node
+final class ScrollView : Node, DragScroller
 {
     float scrollY = 0;  /// distance scrolled from the top, in logical pixels
     bool follow;        /// true to keep showing the end while scrolled to it, for logs
     bool followTop;     /// true to keep showing the top while scrolled to it, for newest-first feeds
+    ScrollDrag drag;    /// pointers that scroll it by dragging the content
+    private Fling fling;    /// content drag and fling
     private bool dragging;  /// thumb is being dragged
     private float grabY;    /// pointer y minus thumb top at grab
     private bool atBottom = true; /// was at the bottom before the last layout
@@ -1176,7 +1318,54 @@ final class ScrollView : Node
         return super.hitTest(p, origin);
     }
 
-    /// Thumb dragging and track clicks.
+    /// True if `source` drags it per `drag`, away from the bar, while there is more to show.
+    bool scrollsDrag(PointerSource source, Point at, out bool onBar)
+    {
+        ScrollStyle s = tree.style!ScrollStyle();
+        ScrollDrag mode = drag == ScrollDrag.inherit ? tree.scrollDrag : drag;
+        onBar = contentH > size.h && at.x >= bounds.right - s.width - 4;
+        return contentH > size.h && mode.scrollsWith(source) && onBar == false;
+    }
+
+    /// Takes a mostly vertical drag with room to scroll that way, or any when `edge` is set.
+    bool takeDrag(Point at, Point moved, bool edge, MonoTime time)
+    {
+        if (abs(moved.y) <= abs(moved.x) || contentH <= size.h)
+        {
+            return false;
+        }
+        if (edge == false && (moved.y > 0 ? scrollY <= 0 : scrollY >= maxScroll))
+        {
+            return false;
+        }
+        fling.grab(at, time);
+        return true;
+    }
+
+    /// Stops a fling and holds the content at `at`.
+    bool catchFling(Point at, MonoTime time)
+    {
+        return fling.catchAt(at, time);
+    }
+
+    /// Moves the fling on to the frame time, until it stops or reaches an end.
+    private void coast()
+    {
+        if (fling.coasting == false)
+        {
+            return;
+        }
+        ScrollStyle s = tree.style!ScrollStyle();
+        float want = scrollY + fling.coast(tree.services.now, s.flingDecay, s.flingMin).y;
+        scrollTo(want);
+        if (scrollY != want)
+        {
+            fling.stop();
+        }
+        fling.next(this, &coast);
+    }
+
+    /// Thumb dragging, track clicks and content drags.
     override bool onPointer(ref const PointerEvent e)
     {
         ScrollStyle s = tree.style!ScrollStyle();
@@ -1203,6 +1392,11 @@ final class ScrollView : Node
             markNeedsPaint();
             return true;
         case PointerKind.move:
+            if (fling.held)
+            {
+                scrollTo(scrollY + fling.drag(e.pos, e.time).y);
+                return true;
+            }
             if (dragging)
             {
                 float track = size.h - t.h;
@@ -1212,6 +1406,16 @@ final class ScrollView : Node
             }
             return false;
         case PointerKind.up:
+            if (fling.held && fling.release(e.pos, e.time, s.flingMin))
+            {
+                fling.next(this, &coast);
+            }
+            fling.held = false;
+            dragging = false;
+            markNeedsPaint();
+            return true;
+        case PointerKind.cancel:
+            fling.held = false;
             dragging = false;
             markNeedsPaint();
             return true;
@@ -1224,13 +1428,14 @@ final class ScrollView : Node
         }
     }
 
-    /// Wheel scrolling. Horizontal turns and Shift with the wheel go on to the parents.
+    /// Wheel scrolling, which stops a fling. Horizontal turns and Shift with the wheel go on to the parents.
     override bool onWheel(ref const WheelEvent e)
     {
         if (contentH <= size.h || e.dy == 0 || (e.mods & Mod.shift) != 0)
         {
             return false;
         }
+        fling.stop();
         scrollTo(scrollY + e.dy);
         return true;
     }
@@ -1269,25 +1474,30 @@ struct ScrollSpec
 {
     bool follow;    /// true to keep showing the end while scrolled to it, for logs
     bool followTop; /// true to keep showing the top while scrolled to it, for newest-first feeds
+    ScrollDrag drag; /// pointers that scroll it by dragging the content
 
     /// Stores the options. Needed because `opCall` hides the struct literal.
-    this(bool follow, bool followTop)
+    this(bool follow, bool followTop, ScrollDrag drag)
     {
         this.follow = follow;
         this.followTop = followTop;
+        this.drag = drag;
     }
 
     /// The scroll view around `child`.
     ScrollView opCall(Node child)
     {
-        return new ScrollView(child, follow, followTop);
+        ScrollView sv = new ScrollView(child, follow, followTop);
+        sv.drag = drag;
+        return sv;
     }
 }
 
-/// Vertical scroll view: `scroll(follow: true)(child)`.
-ScrollSpec scroll(bool follow = false, bool followTop = false)
+/// Vertical scroll view: `scroll(follow: true)(child)`. `drag` picks the pointers that scroll it by dragging the
+/// content, touch and pen unless the window says otherwise, see `WindowOptions.scrollDrag`.
+ScrollSpec scroll(bool follow = false, bool followTop = false, ScrollDrag drag = ScrollDrag.inherit)
 {
-    return ScrollSpec(follow, followTop);
+    return ScrollSpec(follow, followTop, drag);
 }
 
 // Panel skeleton from research/examples/layout.d, now with default cross alignments and spacers.
@@ -1444,6 +1654,36 @@ unittest
     sv.scrollTo(50);
     scrollIntoView(sv.children[0]);
     assert(sv.scrollY == 50, "the content itself keeps the scroll");
+}
+
+// A fling takes the pointer speed over the last 100 ms, opposite to the pointer, and slows to a third in
+// `decay` ms until below the slowest speed. A release after a pause does not fling, and the speed is capped.
+unittest
+{
+    import std.math : isClose;
+
+    MonoTime t = MonoTime.currTime;
+    Fling f;
+    f.grab(Point(0, 300), t);
+    assert(f.drag(Point(0, 290), t + 10.msecs) == Point(0, 10));
+    foreach (int i; 2 .. 30)
+    {
+        f.drag(Point(0, 300 - i * 10), t + (i * 10).msecs);
+    }
+    assert(f.release(Point(0, 10), t + 290.msecs, 50) && f.coasting);
+    assert(isClose(f.velocity.y, 1000) && f.velocity.x == 0);
+    Point d = f.coast(t + 615.msecs, 325, 50);
+    assert(isClose(f.velocity.y, 1000.0 / 3, 1e-3) && isClose(d.y, 1000 * 0.325 / log(3.0) * 2 / 3, 1e-3));
+    f.coast(t + 5000.msecs, 325, 50);
+    assert(f.coasting == false, "stops below the slowest speed");
+
+    f.grab(Point(0, 300), t);
+    f.drag(Point(0, 200), t + 10.msecs);
+    assert(f.release(Point(0, 200), t + 200.msecs, 50) == false && f.coasting == false);
+    f.grab(Point(0, 300), t);
+    f.drag(Point(0, 200), t + 10.msecs);
+    assert(f.release(Point(0, 200), t + 10.msecs, 50) && f.velocity.y == Fling.maxSpeed, "capped");
+    assert(f.catchAt(Point(0, 0), t) && f.held && f.coasting == false);
 }
 
 // A press on the content bubbling up to the view does not page it, only a press in the scrollbar strip does.

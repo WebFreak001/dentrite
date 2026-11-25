@@ -6,12 +6,12 @@
 module dentrite.platform;
 
 import core.atomic : atomicLoad, atomicStore;
-import core.time : Duration;
+import core.time : Duration, MonoTime;
 import dentrite.access : AccessRequest;
 import dentrite.draw : FrameMesh;
 import dentrite.geom;
 import dentrite.image : Image;
-import dentrite.node : CursorShape, PointerKind;
+import dentrite.node : CursorShape, PointerKind, PointerSource, ScrollDrag;
 import dentrite.text : FontKind, GlyphAtlas;
 import dentrite.theme : Theme;
 
@@ -49,6 +49,9 @@ struct WindowOptions
     /// Shows a popup that would not fit in the window in an OS window of its own, when the platform can. Hidden
     /// windows keep popups inside.
     bool popupWindows = true;
+    /// Pointers that scroll a view by dragging its content, for views left at `ScrollDrag.inherit`. Set `always`
+    /// for a pointer that cannot tell the platform it is not a mouse.
+    ScrollDrag scrollDrag = ScrollDrag.touch;
 }
 
 /// Framebuffer size and display density, from `Platform.metrics`.
@@ -91,6 +94,8 @@ struct Event
     ubyte button;        /// `pointer`: 1 left, 2 middle, 3 right
     ubyte clicks;        /// `pointer`: 2 for a double click
     ubyte mods;          /// `Mod` flags, combined with `|`
+    PointerSource source; /// `pointer`: device it came from
+    MonoTime time;       /// `pointer`: when it happened, `MonoTime.init` for when it is handled
     float dx = 0;        /// `wheel`: notches, positive moves content left
     float dy = 0;        /// `wheel`: notches, positive moves content up
     uint key;            /// `key`: Key value or another key code

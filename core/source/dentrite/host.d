@@ -7,7 +7,7 @@
 module dentrite.host;
 
 import core.memory : GC;
-import core.time : Duration, MonoTime;
+import core.time : Duration, MonoTime, usecs;
 import dentrite.access;
 import dentrite.containers : PanelStyle, ScrollStyle, SeparatorStyle, scrollIntoView;
 import dentrite.dock : DockStyle;
@@ -40,8 +40,8 @@ import dentrite.widgets.textarea : TextAreaStyle;
 import dentrite.widgets.textbox : TextBoxStyle;
 import dentrite.widgets.tooltip : TooltipStyle, Tooltips;
 import dentrite.widgets.tree : TreeStyle;
-import std.algorithm.comparison : min;
-import std.math : ceil, round;
+import std.algorithm.comparison : max, min;
+import std.math : abs, ceil, round;
 import std.meta : AliasSeq;
 import std.stdio : stderr;
 import std.utf : stride;
@@ -118,6 +118,12 @@ class Host : Services
     private Node hoverNode;         /// node under the pointer
     private Node captureNode;       /// node that saw the press
     private bool sliding;           /// the held press let go of its node, see `slidePress`
+    private bool holding;           /// `held` waits to see if a drag scroller takes it, see `DragScroller`
+    private PointerEvent held;      /// left press held back
+    private bool mayTake;           /// a drag scroller may take the last left press until it moves `dragStart`
+    private Point pressAt;          /// where the last left press went down
+    private PointerSource source;   /// device of the last pointer event
+    private MonoTime pointerTime;   /// time of the last pointer event
     private Node focusNode;         /// keyboard focus
     private bool revealFocus;       /// scroll the focused node into view after the next layout
     private Point mouse;            /// pointer, logical
@@ -153,6 +159,7 @@ class Host : Services
             check(theme);
         }
         tree = new Tree(text, theme, this);
+        tree.scrollDrag = o.scrollDrag;
         tooltips = new Tooltips(tree);
         access = new AccessTree;
         access.title = o.title;
@@ -427,6 +434,11 @@ class Host : Services
             hook();
         }
         tree.firePaintTimers(frameTime);
+        if (holding && frameTime - held.time >= usecs(cast(long) (tree.style!ScrollStyle().pressDelay * 1000)))
+        {
+            holding = false;
+            deliverPress(held);
+        }
         tooltips.tick(frameTime);
         tree.frameStart = false;
         MonoTime t0 = MonoTime.currTime;
@@ -452,7 +464,7 @@ class Host : Services
             tree.flush();
             boundaries += tree.boundaryLayouts;
         }
-        if (pointerIn && captureNode is null)
+        if (pointerIn && captureNode is null && holding == false)
         {
             setHover(interactiveAt(mouse));
             if (sliding == false)
@@ -722,10 +734,12 @@ class Host : Services
             break;
         case EventKind.focusLost:
             tooltips.hush();
+            holding = false;
+            mayTake = false;
             endComposition(focusNode);
             if (captureNode !is null)
             {
-                PointerEvent up = PointerEvent(PointerKind.up, mouse, 1);
+                PointerEvent up = PointerEvent(PointerKind.up, mouse, 1, 0, 0, source, pointerTime);
                 release(up);
             }
             sliding = false;
@@ -737,24 +751,8 @@ class Host : Services
             {
                 break;
             }
-            mouse = to;
             pointerSurface = e.surface;
-            final switch (e.pointer)
-            {
-            case PointerKind.move:
-            case PointerKind.enter:
-            case PointerKind.leave:
-                pointerIn = true;
-                pointerMoved();
-                break;
-            case PointerKind.down:
-                press(PointerEvent(PointerKind.down, mouse, e.button, e.clicks, e.mods));
-                break;
-            case PointerKind.up:
-                PointerEvent up = PointerEvent(PointerKind.up, mouse, e.button, e.clicks, e.mods);
-                release(up);
-                break;
-            }
+            pointer(e.pointer, to, e.clicks, e.button, e.mods, e.source, e.time);
             break;
         case EventKind.wheel:
             Point at;
@@ -852,10 +850,15 @@ class Host : Services
         }
     }
 
-    /// Hover update and move delivery, to the captured node while a button is held.
+    /// Hover update and move delivery, to the captured node while a button is held. A press a drag scroller may
+    /// take goes to it once it moved far enough, and a held press gets nothing until then.
     private void pointerMoved()
     {
-        PointerEvent move = PointerEvent(PointerKind.move, mouse);
+        if ((holding || (mayTake && captureNode !is null)) && decideDrag())
+        {
+            return;
+        }
+        PointerEvent move = PointerEvent(PointerKind.move, mouse, 0, 0, 0, source, pointerTime);
         if (captureNode !is null)
         {
             bool inside = captureNode.bounds.contains(mouse);
@@ -880,11 +883,13 @@ class Host : Services
         showCursor(hoverNode is null ? CursorShape.arrow : hoverNode.cursor);
     }
 
-    /// Handles a press: closes popups it is outside of, then focus, a context menu for the right button, then capture
-    /// and delivery. A right press that closed popups goes on, so it can open another context menu.
+    /// Handles a press: closes popups it is outside of, catches a fling or holds a left press back for a drag
+    /// scroller, else delivers it. A right press that closed popups goes on, so it can open another context menu.
     private void press(PointerEvent e)
     {
         sliding = false;
+        holding = false;
+        mayTake = false;
         tooltips.hush();
         Node under = tree.root.hitTest(e.pos, Point(0, 0));
         if (tree.root.pressOutside(under) && (e.button != 3 || tree.root.blocks(under)))
@@ -892,6 +897,117 @@ class Host : Services
             setHover(interactiveAt(e.pos));
             return;
         }
+        if (e.button == 1 && holdPress(e))
+        {
+            return;
+        }
+        deliverPress(e);
+    }
+
+    /// Gives left press `e` to a fling under it, or holds it back while a drag scroller under it may take it.
+    /// True if the press goes no further for now. A press on a node keeping drags is not held, but may still be
+    /// taken. One on a scroll bar is neither.
+    private bool holdPress(ref PointerEvent e)
+    {
+        pressAt = e.pos;
+        bool scrolls;
+        for (Node n = reachableAt(e.pos); n !is null; n = n.parent)
+        {
+            DragScroller d = cast(DragScroller) n;
+            if (d is null)
+            {
+                continue;
+            }
+            if (d.catchFling(e.pos, e.time))
+            {
+                setHover(null);
+                captureNode = n;
+                n.pressed = true;
+                return true;
+            }
+            bool onBar;
+            scrolls = d.scrollsDrag(e.source, e.pos, onBar) || scrolls;
+            if (onBar)
+            {
+                return false;
+            }
+        }
+        if (scrolls == false)
+        {
+            return false;
+        }
+        mayTake = true;
+        Node target = interactiveAt(e.pos);
+        if (target !is null && target.drags != DragAxes.none)
+        {
+            return false;
+        }
+        holding = true;
+        held = e;
+        ScrollStyle s = tree.style!ScrollStyle();
+        requestFrameAt(e.time + usecs(cast(long) (s.pressDelay * 1000)));
+        return true;
+    }
+
+    /// Once the press moved `ScrollStyle.dragStart`, gives the drag to the innermost drag scroller that can scroll
+    /// that way, or else along that axis at all, and cancels the press its node had. The scroll starts from where
+    /// the pointer crossed that distance. Else delivers a held press.
+    /// True if the move goes no further: the press is still held or a scroller took it.
+    private bool decideDrag()
+    {
+        Point moved = mouse - pressAt;
+        float far = max(abs(moved.x), abs(moved.y));
+        float start = tree.style!ScrollStyle().dragStart;
+        if (far < start)
+        {
+            return holding;
+        }
+        mayTake = false;
+        DragAxes way = abs(moved.y) > abs(moved.x) ? DragAxes.vertical : DragAxes.horizontal;
+        Node had = holding ? null : captureNode;
+        Node from = had is null ? reachableAt(pressAt) : had;
+        PointerSource by = holding ? held.source : source;
+        Point crossed = Point(pressAt.x + moved.x * start / far, pressAt.y + moved.y * start / far);
+        if (had is null || (had.drags & way) == 0)
+        {
+            foreach (bool edge; [false, true])
+            {
+                for (Node n = from; n !is null; n = n.parent)
+                {
+                    DragScroller d = cast(DragScroller) n;
+                    bool onBar;
+                    if (d is null || d.scrollsDrag(by, pressAt, onBar) == false
+                        || d.takeDrag(crossed, moved, edge, pointerTime) == false)
+                    {
+                        continue;
+                    }
+                    if (had !is null)
+                    {
+                        PointerEvent c = PointerEvent(PointerKind.cancel, mouse, 1, 0, 0, source, pointerTime);
+                        had.onPointer(c);
+                        had.pressed = false;
+                        had.markNeedsPaint();
+                    }
+                    holding = false;
+                    captureNode = n;
+                    n.pressed = true;
+                    PointerEvent move = PointerEvent(PointerKind.move, mouse, 0, 0, 0, source, pointerTime);
+                    n.onPointer(move);
+                    return true;
+                }
+            }
+        }
+        if (holding)
+        {
+            holding = false;
+            deliverPress(held);
+        }
+        return false;
+    }
+
+    /// Delivers a press: focus, a context menu for the right button, then capture and delivery.
+    private void deliverPress(PointerEvent e)
+    {
         Node hit = reachableAt(e.pos);
         for (Node n = hit; n !is null; n = n.parent)
         {
@@ -929,6 +1045,12 @@ class Host : Services
     /// recomputed. A slid release over nothing interactive closes the popups it is outside of, as a press would.
     private void release(ref PointerEvent e)
     {
+        if (holding)
+        {
+            holding = false;
+            deliverPress(held);
+        }
+        mayTake = false;
         if (sliding)
         {
             Node t = interactiveAt(mouse);
@@ -1231,24 +1353,37 @@ class Host : Services
     }
 
     /// Sends a synthetic pointer event for `button` at logical `p` with `mods` held, as platform input would,
-    /// for scripted runs.
-    void inject(PointerKind kind, Point p, ubyte clicks = 1, ubyte button = 1, ubyte mods = 0)
+    /// for scripted runs. `time` defaults to now.
+    void inject(PointerKind kind, Point p, ubyte clicks = 1, ubyte button = 1, ubyte mods = 0,
+        PointerSource from = PointerSource.mouse, MonoTime time = MonoTime.init)
+    {
+        pointerIn = true;
+        pointer(kind, p, clicks, button, mods, from, time);
+    }
+
+    /// Handles pointer event `kind` at logical `p` from device `from` at `time`, now when unset.
+    private void pointer(PointerKind kind, Point p, ubyte clicks, ubyte button, ubyte mods, PointerSource from,
+        MonoTime time)
     {
         mouse = p;
-        pointerIn = true;
+        source = from;
+        pointerTime = time == MonoTime.init ? MonoTime.currTime : time;
         final switch (kind)
         {
         case PointerKind.move:
         case PointerKind.enter:
         case PointerKind.leave:
+            pointerIn = true;
             pointerMoved();
             break;
         case PointerKind.down:
-            press(PointerEvent(PointerKind.down, p, button, clicks, mods));
+            press(PointerEvent(PointerKind.down, p, button, clicks, mods, from, pointerTime));
             break;
         case PointerKind.up:
-            PointerEvent up = PointerEvent(PointerKind.up, p, button, clicks, mods);
+            PointerEvent up = PointerEvent(PointerKind.up, p, button, clicks, mods, from, pointerTime);
             release(up);
+            break;
+        case PointerKind.cancel:
             break;
         }
     }
@@ -1658,4 +1793,166 @@ unittest
     resize(320, 200);
     assert(narrow && tall == false && runs == 4);
     assert(h.windowSize == Size(320, 200));
+}
+
+// A touch swipe on a button in a scroll view scrolls from where it passed `dragStart` without pressing the button,
+// a tap clicks it, and the mouse drags only with `ScrollDrag.always`.
+unittest
+{
+    import core.time : msecs;
+    import dentrite.backend.software : SoftwareRenderer;
+    import dentrite.containers : ScrollView, column, scroll;
+    import dentrite.headless : HeadlessPlatform;
+    import dentrite.widgets.button : button;
+
+    WindowOptions o;
+    o.fonts = ["fonts/Inter-Regular.otf", "fonts/Inter-SemiBold.otf", "fonts/JetBrainsMono-Regular.ttf"];
+    Host h = new Host(new HeadlessPlatform(200, 100, 1), new SoftwareRenderer, o);
+    scope (exit)
+    {
+        h.close();
+    }
+    int clicks;
+    Node[] rows;
+    foreach (int i; 0 .. 20)
+    {
+        rows ~= button("Row", () { ++clicks; });
+    }
+    ScrollView sv = scroll()(column()(rows));
+    h.setRoot(sv);
+    h.frame();
+    MonoTime t = MonoTime.currTime;
+    void touch(PointerKind k, float y, int ms)
+    {
+        h.inject(k, Point(50, y), 1, 1, 0, PointerSource.touch, t + ms.msecs);
+    }
+
+    touch(PointerKind.down, 50, 0);
+    touch(PointerKind.move, 45, 10);
+    assert(sv.scrollY == 0 && h.captureNode is null, "held back below dragStart");
+    touch(PointerKind.move, 30, 20);
+    assert(sv.scrollY == 12 && h.captureNode is sv, "taken, scrolled past where it crossed dragStart");
+    touch(PointerKind.move, 10, 30);
+    assert(sv.scrollY == 32);
+    touch(PointerKind.up, 10, 230);
+    h.frame();
+    assert(clicks == 0 && sv.scrollY == 32, "no click, and no fling after a pause");
+
+    touch(PointerKind.down, 50, 300);
+    touch(PointerKind.move, 47, 310);
+    touch(PointerKind.up, 47, 320);
+    assert(clicks == 1, "a tap clicks");
+
+    h.inject(PointerKind.move, Point(50, 50));
+    h.inject(PointerKind.down, Point(50, 50));
+    h.inject(PointerKind.move, Point(50, 10));
+    h.inject(PointerKind.up, Point(50, 10));
+    assert(sv.scrollY == 32 && clicks == 1, "the mouse does not drag by default");
+    sv.drag = ScrollDrag.always;
+    h.inject(PointerKind.down, Point(50, 50));
+    h.inject(PointerKind.move, Point(50, 10));
+    h.inject(PointerKind.up, Point(50, 10));
+    assert(sv.scrollY == 32 + 40 - 8 && clicks == 1);
+}
+
+// A touch press held past `pressDelay` reaches the button, a drag after it cancels the press and scrolls. A quick
+// release flings on through the next frames, and a press during the fling only stops it.
+unittest
+{
+    import core.thread : Thread;
+    import core.time : msecs;
+    import dentrite.backend.software : SoftwareRenderer;
+    import dentrite.containers : ScrollView, column, scroll;
+    import dentrite.headless : HeadlessPlatform;
+    import dentrite.widgets.button : Button, button;
+
+    WindowOptions o;
+    o.fonts = ["fonts/Inter-Regular.otf", "fonts/Inter-SemiBold.otf", "fonts/JetBrainsMono-Regular.ttf"];
+    Host h = new Host(new HeadlessPlatform(200, 100, 1), new SoftwareRenderer, o);
+    scope (exit)
+    {
+        h.close();
+    }
+    int clicks;
+    Button[] rows;
+    foreach (int i; 0 .. 40)
+    {
+        rows ~= button("Row", () { ++clicks; });
+    }
+    ScrollView sv = scroll()(column()(cast(Node[]) rows));
+    h.setRoot(sv);
+    h.frame();
+    MonoTime t = MonoTime.currTime - 1000.msecs;
+    void touch(PointerKind k, float y, int ms)
+    {
+        h.inject(k, Point(50, y), 1, 1, 0, PointerSource.touch, t + ms.msecs);
+    }
+
+    touch(PointerKind.down, 50, 0);
+    h.frame();
+    Button held = cast(Button) h.captureNode;
+    assert(held !is null && held.pressed, "delivered after the delay");
+    touch(PointerKind.move, 40, 300);
+    touch(PointerKind.move, 30, 310);
+    assert(held.pressed == false && h.captureNode is sv && sv.scrollY == 12);
+    touch(PointerKind.up, 30, 320);
+    assert(clicks == 0);
+
+    touch(PointerKind.down, 90, 900);
+    foreach (int i; 1 .. 5)
+    {
+        touch(PointerKind.move, 90 - i * 20, 900 + i * 10);
+    }
+    float dragged = sv.scrollY;
+    touch(PointerKind.up, 10, 940);
+    assert(sv.scrollY == dragged);
+    Thread.sleep(20.msecs);
+    h.frame();
+    assert(sv.scrollY > dragged, "flinging");
+    float flung = sv.scrollY;
+    h.inject(PointerKind.down, Point(50, 50), 1, 1, 0, PointerSource.touch);
+    h.inject(PointerKind.up, Point(50, 50), 1, 1, 0, PointerSource.touch);
+    Thread.sleep(20.msecs);
+    h.frame();
+    assert(clicks == 0 && sv.scrollY == flung, "the press stopped the fling and clicked nothing");
+}
+
+// A touch drag on an inner scroll view's bar moves its thumb and leaves the outer view alone. On the content,
+// it scrolls the inner view.
+unittest
+{
+    import core.time : msecs;
+    import dentrite.backend.software : SoftwareRenderer;
+    import dentrite.containers : CrossAlign, ScrollView, column, scroll, sized;
+    import dentrite.headless : HeadlessPlatform;
+
+    WindowOptions o;
+    o.fonts = ["fonts/Inter-Regular.otf", "fonts/Inter-SemiBold.otf", "fonts/JetBrainsMono-Regular.ttf"];
+    Host h = new Host(new HeadlessPlatform(200, 200, 1), new SoftwareRenderer, o);
+    scope (exit)
+    {
+        h.close();
+    }
+    ScrollView inner = scroll()(new Fixed(Size(10, 1000)));
+    Node page = column(cross: CrossAlign.start)(sized(w: 150, h: 100)(inner), new Fixed(Size(10, 1000)));
+    ScrollView outer = scroll()(page);
+    h.setRoot(outer);
+    h.frame();
+    MonoTime t = MonoTime.currTime;
+    int ms;
+    void touch(PointerKind k, float x, float y)
+    {
+        ms += 200;
+        h.inject(k, Point(x, y), 1, 1, 0, PointerSource.touch, t + ms.msecs);
+    }
+
+    touch(PointerKind.down, 145, 5);
+    touch(PointerKind.move, 145, 30);
+    touch(PointerKind.up, 145, 30);
+    assert(inner.scrollY > 0 && outer.scrollY == 0, "the thumb moved down");
+    inner.scrollTo(0);
+    touch(PointerKind.down, 50, 80);
+    touch(PointerKind.move, 50, 40);
+    touch(PointerKind.up, 50, 40);
+    assert(inner.scrollY == 40 - 8 && outer.scrollY == 0);
 }

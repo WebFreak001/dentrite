@@ -320,6 +320,9 @@ final class TabBar : Node, AccessParts
                 onClose(armed);
             }
             return true;
+        case PointerKind.cancel:
+            pressedClose = -1;
+            return true;
         default:
             return false;
         }

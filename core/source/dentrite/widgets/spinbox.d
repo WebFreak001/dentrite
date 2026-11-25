@@ -333,6 +333,7 @@ final class SpinBox : Node
             stepBy(held);
             markNeedsPaint();
             return true;
+        case PointerKind.cancel:
         case PointerKind.up:
             held = 0;
             if (tree !is null)

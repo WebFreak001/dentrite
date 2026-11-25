@@ -77,6 +77,19 @@ Known gaps, by area.
 - Only the Linux adapter has been run (AT-SPI). Windows and macOS follow
   accesskit-c's SDL example.
 
+## Touch
+
+- One pointer, from the mouse events SDL makes of touches and pens. No pinch
+  zoom or other multi-touch gestures.
+- No long press: no context menus or text selection by touch. A drag on a
+  text area scrolls it.
+- Drag scrolling covers scroll views, tables and text areas. Tab strips and
+  island scroll areas take the wheel only.
+- No overscroll bounce. A drag goes to the innermost view that can scroll
+  its way and does not pass to the outer one when that view reaches its end.
+- A touch press inside a view that scrolls by dragging shows no press until
+  it lifts, moves a way the view does not scroll, or `pressDelay` passes.
+
 ## Widgets
 
 - Lists, trees, tables: type-ahead matches the text start only.

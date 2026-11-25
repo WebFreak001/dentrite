@@ -124,7 +124,7 @@ final class Slider : Node
     private double delegate() read;     /// bound value, tracked
     private void delegate(double) write; /// writes the bound value
     private double shown = 0; /// value last read
-    private double before = 0; /// value at the press, put back by Escape
+    private double before = 0; /// value at the press, put back by Escape or a cancelled press
     private float grab = 0;   /// pointer x minus thumb center at the press
     private bool dragging;    /// thumb follows the pointer
 
@@ -240,6 +240,14 @@ final class Slider : Node
             }
             return dragging;
         case PointerKind.up:
+            dragging = false;
+            markNeedsPaint();
+            return true;
+        case PointerKind.cancel:
+            if (dragging)
+            {
+                set(before);
+            }
             dragging = false;
             markNeedsPaint();
             return true;
@@ -556,4 +564,45 @@ unittest
     h.inject(PointerKind.down, Point(x50, y));
     h.inject(PointerKind.up, Point(x50, y));
     assert(v.peek == 1, "disabled");
+}
+
+// In a scroll view, a sideways touch drag moves the slider and an upward one scrolls past it untouched.
+unittest
+{
+    import core.time : MonoTime, msecs;
+    import dentrite.containers : ScrollView, column, row, scroll, sized;
+    import dentrite.host : Host;
+    import dentrite.signals : signal;
+    import dentrite.widgets.menu : menuHost;
+
+    Host h = menuHost(300, 100);
+    scope (exit)
+    {
+        h.close();
+    }
+    Signal!int v = signal(50);
+    Slider sl = slider(v, 0, 100);
+    ScrollView sv = scroll()(column()(row()(sl), sized(h: 500)(column()())));
+    h.setRoot(sv);
+    h.frame();
+    Point c = Point(sl.bounds.x + sl.bounds.w / 2, sl.bounds.y + sl.bounds.h / 2);
+    MonoTime t = MonoTime.currTime;
+    int ms;
+    void touch(PointerKind k, float dx, float dy)
+    {
+        ms += 200;
+        h.inject(k, Point(c.x + dx, c.y + dy), 1, 1, 0, PointerSource.touch, t + ms.msecs);
+    }
+
+    touch(PointerKind.down, 0, 0);
+    touch(PointerKind.move, 0, -5);
+    touch(PointerKind.move, 0, -30);
+    touch(PointerKind.up, 0, -30);
+    assert(v.peek == 50 && sv.scrollY > 0, "scrolled, the slider untouched");
+    sv.scrollTo(0);
+    h.frame();
+    touch(PointerKind.down, 0, 0);
+    touch(PointerKind.move, 30, 2);
+    touch(PointerKind.up, 30, 2);
+    assert(v.peek > 50 && sv.scrollY == 0, "moved the slider");
 }

@@ -330,6 +330,9 @@ bool SDL_SetNumberProperty(SDL_PropertiesID props, const(char)* name, long value
 enum SDL_PROP_TEXTINPUT_TYPE_NUMBER = "SDL.textinput.type"; /// text input property, an SDL_TextInputType
 enum SDL_TEXTINPUT_TYPE_TEXT_PASSWORD_HIDDEN = 4;          /// SDL_TextInputType for a hidden password
 ushort SDL_GetModState();                              /// held modifiers, SDL_KMOD_* bits
+ulong SDL_GetTicksNS();                                /// nanoseconds since SDL started, the clock of event timestamps
+enum uint SDL_TOUCH_MOUSEID = 0xffffffff;               /// mouse id of mouse events made from touches
+enum uint SDL_PEN_MOUSEID = 0xfffffffe;                 /// mouse id of mouse events made from pens
 
 char* SDL_GetClipboardText();                           /// clipboard, free with SDL_free
 bool SDL_SetClipboardText(const(char)* text);           /// sets the clipboard

@@ -5,7 +5,7 @@ import core.stdc.stdlib : free, malloc;
 import core.stdc.string : strdup;
 import core.sync.mutex : Mutex;
 import core.thread : Thread;
-import core.time : Duration, MonoTime, msecs;
+import core.time : Duration, MonoTime, msecs, nsecs;
 import dentrite.access : AccessAdapter, AccessDemand, AccessUpdate;
 import dentrite.accesskit : AccessKitAdapter;
 import dentrite.backend.gl33 : GL33Renderer;
@@ -16,7 +16,7 @@ import dentrite.deadkeys : DeadKeys;
 import dentrite.draw : FrameMesh;
 import dentrite.geom;
 import dentrite.image : Image;
-import dentrite.node : CursorShape, Mod, PointerKind;
+import dentrite.node : CursorShape, Mod, PointerKind, PointerSource;
 import dentrite.platform;
 import dentrite.text : GlyphAtlas;
 import std.math : ceil;
@@ -684,6 +684,15 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl, T
         return true;
     }
 
+    /// Sets the device and time of pointer event `e` from SDL mouse id `which` and timestamp `ns`.
+    private static void stamp(ref Event e, uint which, ulong ns)
+    {
+        e.source = which == SDL_TOUCH_MOUSEID ? PointerSource.touch
+            : which == SDL_PEN_MOUSEID ? PointerSource.pen : PointerSource.mouse;
+        ulong at = SDL_GetTicksNS();
+        e.time = MonoTime.currTime - nsecs(cast(long) (at > ns ? at - ns : 0));
+    }
+
     /// SDL id of the window that window or pointer event `s` came from, 0 for other events.
     private static uint windowOf(ref const SDL_Event s)
     {
@@ -779,6 +788,7 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl, T
             e.kind = EventKind.pointer;
             e.pointer = PointerKind.move;
             e.pos = toPixels(s.motion.x, s.motion.y);
+            stamp(e, s.motion.which, s.motion.timestamp);
             break;
         case SDL_EventType.mouseButtonDown:
         case SDL_EventType.mouseButtonUp:
@@ -787,6 +797,7 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl, T
             e.pos = toPixels(s.button.x, s.button.y);
             e.button = s.button.button;
             e.clicks = s.button.clicks;
+            stamp(e, s.button.which, s.button.timestamp);
             e.mods = modsOf(SDL_GetModState());
             break;
         case SDL_EventType.mouseWheel:

@@ -187,6 +187,10 @@ final class Island : Node, Updatable, FocusScope, Composer, AccessContent, Acces
                 ui.released = true;
             }
             break;
+        case PointerKind.cancel:
+            ui.down = false;
+            ui.mouse = Point(-1e9, -1e9);
+            break;
         case PointerKind.leave:
             ui.mouse = Point(-1e9, -1e9);
             break;

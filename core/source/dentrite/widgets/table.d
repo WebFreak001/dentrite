@@ -7,7 +7,8 @@
 /// at the bottom.
 module dentrite.widgets.table;
 
-import dentrite.containers : ScrollStyle, ScrollView, scroll;
+import core.time : MonoTime;
+import dentrite.containers : Fling, ScrollStyle, ScrollView, scroll;
 import dentrite.access : AccessParts, nodeText, textOnly;
 import dentrite.node;
 import dentrite.signals;
@@ -71,7 +72,7 @@ struct SortOrder
 }
 
 /// Table over app data. Build it with `table`.
-final class Table(K, T) : Node
+final class Table(K, T) : Node, DragScroller
 {
     VirtualList!(K, T) list; /// virtual list showing the rows
     ScrollView view;         /// scroll view around the rows
@@ -88,6 +89,8 @@ final class Table(K, T) : Node
     private void delegate(T) activated; /// Enter or a double click, or null
     private bool dragging;             /// horizontal thumb is being dragged
     private float grabX;               /// pointer x minus thumb left at grab
+    private Fling fling;               /// sideways content drag and fling
+    private float panX = 0;            /// unrounded scroll distance while dragged or flung
 
     /// Creates a table. Use `table`, which also builds the rows.
     this(T[] delegate() source, K delegate(T) keyOf, TableColumn!T[] columns, Signal!K selection,
@@ -397,9 +400,84 @@ final class Table(K, T) : Node
         return super.hitTest(p, origin);
     }
 
-    /// Thumb dragging and track clicks.
+    /// True if `source` drags it per the window, away from the bar, while the columns are wider than it.
+    bool scrollsDrag(PointerSource source, Point at, out bool onBar)
+    {
+        ScrollStyle s = tree.style!ScrollStyle();
+        onBar = totalWidth > size.w && at.y >= bounds.bottom - s.width - 4;
+        return totalWidth > size.w && tree.scrollDrag.scrollsWith(source) && onBar == false;
+    }
+
+    /// Takes a mostly sideways drag with room to scroll that way, or any when `edge` is set.
+    bool takeDrag(Point at, Point moved, bool edge, MonoTime time)
+    {
+        if (abs(moved.x) <= abs(moved.y) || totalWidth <= size.w)
+        {
+            return false;
+        }
+        if (edge == false && (moved.x > 0 ? scrollX <= 0 : scrollX >= maxScrollX))
+        {
+            return false;
+        }
+        fling.grab(at, time);
+        panX = scrollX;
+        return true;
+    }
+
+    /// Stops a fling and holds the content at `at`.
+    bool catchFling(Point at, MonoTime time)
+    {
+        return fling.catchAt(at, time);
+    }
+
+    /// Scrolls sideways by `d` from the unrounded distance. False if that went past an end.
+    private bool panBy(float d)
+    {
+        float want = panX + d;
+        panX = clamp(want, 0, maxScrollX);
+        scrollXTo(panX);
+        return panX == want;
+    }
+
+    /// Moves the fling on to the frame time, until it stops or reaches an end.
+    private void coast()
+    {
+        if (fling.coasting == false)
+        {
+            return;
+        }
+        ScrollStyle s = tree.style!ScrollStyle();
+        if (panBy(fling.coast(tree.services.now, s.flingDecay, s.flingMin).x) == false)
+        {
+            fling.stop();
+        }
+        fling.next(this, &coast);
+    }
+
+    /// Thumb dragging, track clicks and content drags.
     override bool onPointer(ref const PointerEvent e)
     {
+        if (fling.held)
+        {
+            switch (e.kind)
+            {
+            case PointerKind.move:
+                panBy(fling.drag(e.pos, e.time).x);
+                return true;
+            case PointerKind.up:
+                ScrollStyle fs = tree.style!ScrollStyle();
+                if (fling.release(e.pos, e.time, fs.flingMin))
+                {
+                    fling.next(this, &coast);
+                }
+                return true;
+            case PointerKind.cancel:
+                fling.held = false;
+                return true;
+            default:
+                break;
+            }
+        }
         ScrollStyle s = tree.style!ScrollStyle();
         Rect b = bounds;
         Rect t = thumb(b.pos, s);
@@ -427,6 +505,7 @@ final class Table(K, T) : Node
             }
             return dragging;
         case PointerKind.up:
+        case PointerKind.cancel:
             dragging = false;
             markNeedsPaint();
             return true;
@@ -447,6 +526,7 @@ final class Table(K, T) : Node
         {
             return false;
         }
+        fling.stop();
         scrollXTo(scrollX + d);
         return true;
     }
@@ -486,6 +566,7 @@ private final class TableHeader(K, T) : Node, AccessParts
         this.table = table;
         interactive = true;
         focusable = true;
+        drags = DragAxes.horizontal;
     }
 
     /// Header row named by the shown titles.
@@ -766,6 +847,16 @@ private final class TableHeader(K, T) : Node, AccessParts
             pressedOn = -1;
             markNeedsPaint();
             return true;
+        case PointerKind.cancel:
+            if (resizing >= 0)
+            {
+                table.setWidth(resizing, startW);
+            }
+            resizing = -1;
+            moving = false;
+            pressedOn = -1;
+            markNeedsPaint();
+            return true;
         default:
             return false;
         }
@@ -1023,6 +1114,7 @@ private final class TableRow(K, T) : Node
             }
             return pressed;
         case PointerKind.up:
+        case PointerKind.cancel:
             table.list.endDrag();
             return true;
         default:
@@ -1353,4 +1445,48 @@ unittest
         }
     }
     assert(rows > 0 && rows < t.list.children.length, "some bound rows are hidden");
+}
+
+// A sideways touch drag on the rows scrolls the columns without selecting, and one on the header resizes.
+unittest
+{
+    import core.time : MonoTime, msecs;
+    import dentrite.host : Host;
+    import dentrite.widgets.label : label;
+    import dentrite.widgets.menu : menuHost;
+
+    Host h = menuHost(300, 200);
+    scope (exit)
+    {
+        h.close();
+    }
+    Planet[] planets = [Planet("Mars", 2), Planet("Earth", 1)];
+    Signal!string sel = signal("");
+    Table!(string, Planet) t = table(items: () => planets, key: (Planet p) => p.name, selected: sel)(
+        tableColumn("Name", (Planet delegate() p) => label(() => p().name), width: 300),
+        tableColumn("Notes", (Planet delegate() p) => label("-"), width: 200),
+    );
+    h.setRoot(t);
+    h.frame();
+    MonoTime at = MonoTime.currTime;
+    int ms;
+    void swipe(Point from, float dx)
+    {
+        float s = dx < 0 ? -1 : 1;
+        foreach (float x; [0, s * 4, s * 20, dx])
+        {
+            ms += 200;
+            h.inject(x == 0 ? PointerKind.down : PointerKind.move, Point(from.x + x, from.y), 1, 1, 0,
+                PointerSource.touch, at + ms.msecs);
+        }
+        h.inject(PointerKind.up, Point(from.x + dx, from.y), 1, 1, 0, PointerSource.touch, at + ms.msecs);
+        h.frame();
+    }
+
+    Rect r0 = t.list.children[0].bounds;
+    swipe(Point(200, r0.y + 5), -60);
+    assert(t.scrolledX == 60 - 8 && sel.peek == "", "scrolled sideways, nothing selected");
+    Rect hb = t.head.bounds;
+    swipe(Point(hb.x + 300 - 52, hb.y + hb.h / 2), 30);
+    assert(t.width(0) == 330 && t.scrolledX == 52, "the header keeps sideways drags");
 }

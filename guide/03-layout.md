@@ -20,7 +20,7 @@ All in `dentrite.containers`:
 | `sized(w:, h:)(child)` | Fixed width, height or both. A missing one is left to the parent. |
 | `panel(variant:)(child)` | Themed background, border and padding. |
 | `hrule()`, `vrule()` | One pixel separators. |
-| `scroll(follow:, followTop:)(child)` | Vertical scroll view. `follow: true` sticks to the bottom, for logs. `followTop: true` sticks to the top, for newest-first feeds. |
+| `scroll(follow:, followTop:, drag:)(child)` | Vertical scroll view. `follow: true` sticks to the bottom, for logs. `followTop: true` sticks to the top, for newest-first feeds. `drag:` picks the pointers that scroll it by dragging the content, see below. |
 | `grid(cols:, minCell:, gap:, cross:)(kids...)` | Rows of equal columns: `cols` of them, or as many at least `minCell` wide as fit. |
 | `stack(x:, y:)(kids...)` | Children on top of each other, the last on top. |
 | `aligned(x:, y:)(child)` | Stack child with its own placement. |
@@ -67,6 +67,14 @@ The middle row is `expanded`, so it takes the height the bars leave. Its
 `cross: CrossAlign.stretch` makes the sidebar and the scroll view as tall
 as the row. The scroll view is `expanded` in turn, so it takes the width
 the sidebar leaves.
+
+Touch and pen drags on the content scroll it, and a quick release flings it
+on. Scroll views, tables and text areas all do this. A press waits until
+it moves (scroll) or lifts (tap), so a swipe never presses a button or
+selects a row. `WindowOptions.scrollDrag` picks the pointers for the whole
+window: `ScrollDrag.always` adds the mouse, for a VR laser pointer fed in as
+mouse input, and `never` turns dragging off. `scroll(drag:)` overrides it
+for one view. The distances and times are in the theme's `[scroll]` section.
 
 ## Sharing space
 

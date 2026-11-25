@@ -1218,6 +1218,13 @@ final class ListItem : Node
                 holder.dragTo(e.pos.y);
             }
             break;
+        case PointerKind.cancel:
+            if (holder !is null)
+            {
+                holder.endDrag();
+                holder = null;
+            }
+            break;
         case PointerKind.up:
             if (holder !is null)
             {

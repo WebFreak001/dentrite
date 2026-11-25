@@ -8,7 +8,7 @@
 module dentrite.widgets.textarea;
 
 import core.time : MonoTime, msecs;
-import dentrite.containers : ScrollStyle;
+import dentrite.containers : Fling, ScrollStyle;
 import dentrite.node;
 import dentrite.signals : Signal, effect;
 import dentrite.text;
@@ -16,7 +16,7 @@ import std.algorithm.comparison : clamp, max, min;
 import std.array : join, split;
 import std.ascii : isAlphaNum;
 import std.conv : to;
-import std.math : ceil, floor, isInfinity, isNaN, round;
+import std.math : abs, ceil, floor, isInfinity, isNaN, round;
 import std.utf : stride, strideBack;
 
 /// Look of a text area. The scroll bar is `ScrollStyle`.
@@ -152,7 +152,7 @@ private string[] linesOf(string s)
 }
 
 /// Retained multi-line editor. Build it with `textArea`.
-final class TextArea : Node, Composer
+final class TextArea : Node, Composer, DragScroller
 {
     Signal!string value;  /// bound text
     string placeholder;   /// placeholder text shown while empty
@@ -185,6 +185,7 @@ final class TextArea : Node, Composer
     private float grabY = 0;        /// pointer y minus thumb top at grab
     private bool sideThumbHeld;     /// dragging the sideways scroll thumb
     private float grabX = 0;        /// pointer x minus sideways thumb left at grab
+    private Fling fling;            /// content drag and fling
     private Snapshot[] undos;       /// steps to undo, latest last
     private Snapshot[] redos;       /// undone steps, latest last
     private EditKind lastKind;      /// kind of the last edit
@@ -893,12 +894,34 @@ final class TextArea : Node, Composer
         markNeedsPaint();
     }
 
-    /// Caret placement, word or line selection on double and triple clicks, drag selection, the scroll thumbs.
+    /// Caret placement, word or line selection on double and triple clicks, drag selection, the scroll thumbs,
+    /// content drags.
     override bool onPointer(ref const PointerEvent e)
     {
         if (enabled == false || rows.length == 0)
         {
             return false;
+        }
+        if (fling.held)
+        {
+            switch (e.kind)
+            {
+            case PointerKind.move:
+                panBy(fling.drag(e.pos, e.time));
+                return true;
+            case PointerKind.up:
+                ScrollStyle fs = tree.style!ScrollStyle();
+                if (fling.release(e.pos, e.time, fs.flingMin))
+                {
+                    fling.next(this, &coast);
+                }
+                return true;
+            case PointerKind.cancel:
+                fling.held = false;
+                return true;
+            default:
+                break;
+            }
         }
         TextAreaStyle s = style();
         ScrollStyle ss = tree.style!ScrollStyle();
@@ -998,6 +1021,7 @@ final class TextArea : Node, Composer
                 touch();
             }
             return dragging;
+        case PointerKind.cancel:
         case PointerKind.up:
             dragging = false;
             thumbHeld = false;
@@ -1014,6 +1038,64 @@ final class TextArea : Node, Composer
         default:
             return false;
         }
+    }
+
+    /// True if `source` drags it per the window, away from the bars, while the text does not fit.
+    bool scrollsDrag(PointerSource source, Point at, out bool onBar)
+    {
+        TextAreaStyle s = style();
+        ScrollStyle ss = tree.style!ScrollStyle();
+        bool overflows = maxScrollY(size.h - s.padY * 2) > 0 || maxScrollX > 0;
+        onBar = enabled && overBar(at, ss, s);
+        return enabled && overflows && tree.scrollDrag.scrollsWith(source) && onBar == false;
+    }
+
+    /// Takes a drag along the axis it mostly moved on, if the text scrolls that way, with room left unless `edge`
+    /// is set. The drag then scrolls both ways.
+    bool takeDrag(Point at, Point moved, bool edge, MonoTime time)
+    {
+        bool across = abs(moved.x) > abs(moved.y);
+        float most = across ? maxScrollX : maxScrollY(size.h - style().padY * 2);
+        float now = across ? scrollX : scrollY;
+        float toward = across ? moved.x : moved.y;
+        if (most <= 0 || (edge == false && (toward > 0 ? now <= 0 : now >= most)))
+        {
+            return false;
+        }
+        dragging = false;
+        fling.grab(at, time);
+        return true;
+    }
+
+    /// Stops a fling and holds the text at `at`.
+    bool catchFling(Point at, MonoTime time)
+    {
+        return fling.catchAt(at, time);
+    }
+
+    /// Scrolls by `d`, clamped. False if that went past an end.
+    private bool panBy(Point d)
+    {
+        Point want = Point(scrollX + d.x, scrollY + d.y);
+        scrollX = clamp(want.x, 0, maxScrollX);
+        scrollY = clamp(want.y, 0, maxScrollY(size.h - style().padY * 2));
+        markNeedsPaint();
+        return scrollX == want.x && scrollY == want.y;
+    }
+
+    /// Moves the fling on to the frame time, until it stops or reaches an end.
+    private void coast()
+    {
+        if (fling.coasting == false)
+        {
+            return;
+        }
+        ScrollStyle ss = tree.style!ScrollStyle();
+        if (panBy(fling.coast(tree.services.now, ss.flingDecay, ss.flingMin)) == false)
+        {
+            fling.stop();
+        }
+        fling.next(this, &coast);
     }
 
     /// True if window point `p` is over a scroll bar's strip, where presses scroll.
@@ -1033,6 +1115,7 @@ final class TextArea : Node, Composer
     override bool onWheel(ref const WheelEvent e)
     {
         TextAreaStyle s = style();
+        fling.stop();
         float viewH = size.h - s.padY * 2;
         bool sideways = e.dx != 0 || (e.mods & Mod.shift) != 0;
         if (sideways)
@@ -1600,4 +1683,40 @@ unittest
     assert(v.peek == "aかd" && a.caret == TextPos(0, 4) && a.composing is null);
     h.frame();
     assert(a.shownLine(0) == "aかd");
+}
+
+// A touch swipe scrolls a text area without moving the caret or focusing it, a tap places the caret.
+unittest
+{
+    import core.time : MonoTime, msecs;
+    import dentrite.containers : CrossAlign, column, sized;
+    import dentrite.host : Host;
+    import dentrite.signals : signal;
+    import dentrite.widgets.menu : menuHost;
+
+    Host h = menuHost(400, 300);
+    scope (exit)
+    {
+        h.close();
+    }
+    Signal!string v = signal("1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12");
+    TextArea a = textArea(v);
+    h.setRoot(column(cross: CrossAlign.start)(sized(w: 200, h: 60)(a)));
+    h.frame();
+    MonoTime t = MonoTime.currTime;
+    int ms;
+    void touch(PointerKind k, float y)
+    {
+        ms += 200;
+        h.inject(k, Point(a.bounds.x + 50, a.bounds.y + y), 1, 1, 0, PointerSource.touch, t + ms.msecs);
+    }
+
+    touch(PointerKind.down, 50);
+    touch(PointerKind.move, 40);
+    touch(PointerKind.move, 20);
+    touch(PointerKind.up, 20);
+    assert(a.scrollY == 22 && a.caret == TextPos.init && h.focused is null);
+    touch(PointerKind.down, 10);
+    touch(PointerKind.up, 10);
+    assert(h.focused is a && a.caret.line > 0, "a tap places the caret on a scrolled line");
 }

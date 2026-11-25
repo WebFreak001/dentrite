@@ -5,14 +5,14 @@ import core.time : MonoTime, msecs;
 import dentrite.command : Chord, chord;
 import dentrite.geom : Point;
 import dentrite.host : Host;
-import dentrite.node : PointerKind;
+import dentrite.node : PointerKind, PointerSource;
 import std.conv : to;
 import std.format : format;
 import std.string : indexOf, split, strip;
 
 /// Steps `runScript` takes, for help texts.
 enum string scriptSteps = "click:X,Y[,Ctrl+Shift] dclick:X,Y rclick:X,Y down:X,Y move:X,Y up:X,Y drag:X0,Y0,X1,Y1 "
-    ~ "wheel:X,Y,DY hwheel:X,Y,DX type:TEXT compose:TEXT key:SHORTCUT wait:FRAMES";
+    ~ "wheel:X,Y,DY hwheel:X,Y,DX tap:X,Y swipe:X0,Y0,X1,Y1 type:TEXT compose:TEXT key:SHORTCUT wait:FRAMES";
 
 /// Handles waiting platform events and renders `n` frames 16 ms apart, so timers, animations and answers from
 /// other threads move on.
@@ -31,8 +31,9 @@ void settle(Host h, int n)
 
 /// Runs the `;` separated steps of `script` on `h` after two settling frames, rendering a frame after each
 /// step. Coordinates are logical pixels, `wheel` distances too. A click may name held modifiers, as
-/// `click:10,20,Ctrl`. `onStep` hears each step after its frame, with the times it began and its input was
-/// handled. Throws on an unknown or malformed step.
+/// `click:10,20,Ctrl`. `tap` and `swipe` touch, a swipe moving over 6 frames before letting go. `onStep` hears
+/// each step after its frame, with the times it began and its input was handled. Throws on an unknown or
+/// malformed step.
 void runScript(Host h, string script, void delegate(string step, MonoTime began, MonoTime handled) onStep = null)
 {
     settle(h, 2);
@@ -85,6 +86,25 @@ void runScript(Host h, string script, void delegate(string step, MonoTime began,
             h.inject(PointerKind.move, b);
             settle(h, 1);
             h.inject(PointerKind.up, b);
+            break;
+        case "tap":
+            Point p = point(numbers(step, arg, 2));
+            h.inject(PointerKind.down, p, 1, 1, 0, PointerSource.touch);
+            h.inject(PointerKind.up, p, 1, 1, 0, PointerSource.touch);
+            break;
+        case "swipe":
+            float[] n = numbers(step, arg, 4);
+            Point a = point(n[0 .. 2]);
+            Point b = point(n[2 .. 4]);
+            h.inject(PointerKind.down, a, 1, 1, 0, PointerSource.touch);
+            foreach (int i; 1 .. 7)
+            {
+                settle(h, 1);
+                float f = i / 6.0f;
+                Point at = Point(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f);
+                h.inject(PointerKind.move, at, 1, 1, 0, PointerSource.touch);
+            }
+            h.inject(PointerKind.up, b, 1, 1, 0, PointerSource.touch);
             break;
         case "wheel":
             float[] n = numbers(step, arg, 3);

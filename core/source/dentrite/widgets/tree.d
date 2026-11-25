@@ -415,6 +415,7 @@ private final class TreeRow(K, T) : Node
             }
             return true;
         case PointerKind.up:
+        case PointerKind.cancel:
             view.list.endDrag();
             return true;
         default:

@@ -557,6 +557,7 @@ class TextBox : Node, Composer
                 touch();
             }
             return line.dragging;
+        case PointerKind.cancel:
         case PointerKind.up:
             line.dragging = false;
             return true;

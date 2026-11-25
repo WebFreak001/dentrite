@@ -80,7 +80,9 @@ unittest
 
 ## Input
 
-- `inject(PointerKind, Point, clicks, button, mods)` sends pointer events.
+- `inject(PointerKind, Point, clicks, button, mods, source, time)` sends
+  pointer events. `PointerSource.touch` and a time per event test drags
+  and flings.
 - `injectKey(key, mods)` sends a key to the focused node, then its
   parents, then the window's shortcuts: `injectKey('s', Mod.ctrl)`.
 - `injectText("...")` types into the focused node.
