@@ -62,14 +62,6 @@ enum SDL_GLAttr : int
 
 enum int SDL_GL_CONTEXT_PROFILE_CORE = 1; /// core profile mask
 
-/// What `SDL_PeepEvents` does with the events it finds.
-enum SDL_EventAction
-{
-    add,  /// queues them
-    peek, /// copies them, leaving them queued
-    get,  /// copies and removes them
-}
-
 /// Event types used here.
 enum SDL_EventType : uint
 {
@@ -321,8 +313,6 @@ bool SDL_BlitSurface(SDL_Surface* src, const(SDL_Rect)* srcRect, SDL_Surface* ds
 bool SDL_PollEvent(SDL_Event* event);                   /// next event, false if none
 bool SDL_WaitEventTimeout(SDL_Event* event, int timeoutMS); /// next event, false on timeout
 bool SDL_PushEvent(SDL_Event* event);                   /// queues an event, any thread
-/// Peeks at or takes up to `numevents` queued events with types in `minType` to `maxType`, without pumping.
-int SDL_PeepEvents(SDL_Event* events, int numevents, SDL_EventAction action, uint minType, uint maxType);
 uint SDL_RegisterEvents(int count);                     /// first of `count` user event types
 
 bool SDL_StartTextInput(SDL_Window* window);            /// enables text events
