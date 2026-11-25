@@ -791,6 +791,9 @@ private struct Guide
     Rect rect; /// button, local coordinates
 }
 
+/// Space between the drop buttons over a stack.
+private enum float guideGap = 4;
+
 /// Pointer travel that turns a tab press into a drag.
 private enum float dragThreshold = 5;
 
@@ -1155,7 +1158,7 @@ final class DockView : Node, WindowKeys
     {
         Rect c = contentOf(stack);
         float g = s.guideSize;
-        float step = g + 4;
+        float step = g + guideGap;
         float x = round(c.x + (c.w - g) / 2);
         float y = round(c.y + (c.h - g) / 2);
         Guide[] gs;
@@ -1198,16 +1201,32 @@ final class DockView : Node, WindowKeys
     private Drop dropAt(Point p)
     {
         DockStyle s = tree.style!DockStyle();
-        DockNode st = stackUnder(p, grabWindow);
-        bool bar = st !is null && p.y < st.rect.y + tabBarHeight;
-        bool alone = st !is null && st.panes.length == 1 && st.panes[0] == moving;
-        guided = st is null || bar || alone ? null : st;
+        Drop outer;
         foreach (Guide g; outerGuides(s))
         {
             if (g.rect.contains(p))
             {
-                return Drop(Drop.Kind.outer, null, g.zone);
+                outer = Drop(Drop.Kind.outer, null, g.zone);
             }
+        }
+        // The buttons of a narrow stack overhang its neighbors, keep them while the pointer is on them.
+        if (guided !is null && outer.kind == Drop.Kind.none)
+        {
+            foreach (Guide g; stackGuides(guided, s))
+            {
+                if (g.rect.inset(-guideGap / 2).contains(p))
+                {
+                    return g.rect.contains(p) ? Drop(Drop.Kind.zone, guided, g.zone) : Drop.init;
+                }
+            }
+        }
+        DockNode st = stackUnder(p, grabWindow);
+        bool bar = st !is null && p.y < st.rect.y + tabBarHeight;
+        bool alone = st !is null && st.panes.length == 1 && st.panes[0] == moving;
+        guided = st is null || bar || alone ? null : st;
+        if (outer.kind != Drop.Kind.none)
+        {
+            return outer;
         }
         if (bar)
         {
@@ -1896,4 +1915,29 @@ unittest
     assert(f.escape());
     f.end();
     assert(f.v.space.floating[1].rect == Rect(380, 150, 120, 150) && f.v.mode == Drag.none);
+}
+
+// Drop buttons that overhang a narrow stack stay reachable over its neighbor.
+unittest
+{
+    DockFixture f = DockFixture.make();
+    scope (exit)
+    {
+        f.dispose();
+    }
+    f.send(PointerKind.down, Point(502, 300));
+    f.send(PointerKind.move, Point(952, 300));
+    f.end();
+    DockNode memory = f.v.space.find("memory");
+    assert(memory.rect.w < 104, "narrower than the buttons");
+    f.begin(f.tab("source", 0));
+    f.to(f.guide("memory", Zone.center));
+    assert(f.v.guided is memory);
+    Point left = f.guide("memory", Zone.left);
+    assert(f.v.space.find("source").rect.contains(left), "button over the neighbor");
+    f.to(left);
+    assert(f.v.drop.kind == Drop.Kind.zone && f.v.drop.stack is memory && f.v.drop.zone == Zone.left);
+    f.to(Point(200, 400));
+    assert(f.v.guided is null && f.v.drop.kind == Drop.Kind.none, "off the buttons, over its own stack");
+    f.end();
 }
