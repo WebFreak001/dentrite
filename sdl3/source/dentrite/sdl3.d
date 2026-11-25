@@ -364,8 +364,10 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl, T
     private float forced = 0;       /// `WindowOptions.scale`, 0 for the display's own
     private SdlTray[] trays;        /// tray icons open
     private SdlPopup[] popups;      /// popup windows open, parents before their children
-    private SDL_Event[] ahead;      /// queued events `dropRepeatBurst` looks at
-    private ulong pressedAt;        /// SDL time the last key press without repeat came in
+    private int upScancode;         /// scancode of the last key up
+    private ulong upAt;             /// SDL time stamp of the last key up
+    private int imeRepeating;       /// scancode an input method repeats with its own presses, 0 for none
+    private bool dropText;          /// the next text event belongs to a dropped key repeat
 
     /// Opens the window and sets up the renderer `o.renderer` names.
     this(WindowOptions o)
@@ -553,7 +555,7 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl, T
         {
             return false;
         }
-        if (dropRepeatBurst(s))
+        if (dropStaleRepeat(s))
         {
             e = Event.init;
             return true;
@@ -597,59 +599,48 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl, T
         }
     }
 
-    /// Drops `s` and the queued events after it when `s` starts a burst of stale key repeats and their text
-    /// that ends with the key's release, which stays queued. True if dropped.
-    /// HACK: for fcitx5 on Hyprland. fcitx5 repeats a held key itself, as a release and a press each time,
-    /// all stamped with the time of the first press. On the real release, SDL's Wayland backend sends every
-    /// repeat due since that time, so the text doubles. Those repeats are stamped before the last press came
-    /// in, which real ones never are. Remove once fcitx5 or SDL fixes it.
-    private bool dropRepeatBurst(ref const SDL_Event s)
+    /// True if `s` is a stale key repeat SDL made up, or the text of one, which is then dropped.
+    /// HACK: for fcitx5 on Wayland. fcitx5 repeats a held key itself, as a release and a press each time,
+    /// all stamped with the Wayland time of the first press. Each press restarts SDL's own repeat from that
+    /// time, so on the real release SDL sends every repeat due since the first press, and the text doubles.
+    /// Such a press carries the same time stamp as the release just before it, which a real one never does,
+    /// and while a key is pressed like that, SDL's repeats of it are all stale. Their own time stamps can't
+    /// tell, as SDL 3.4 clamps them to the current time. Remove once fcitx5 or SDL fixes it.
+    private bool dropStaleRepeat(ref const SDL_Event s)
     {
-        if (s.type == SDL_EventType.keyDown && s.key.repeat == false)
-        {
-            pressedAt = SDL_GetTicksNS();
-        }
-        if (wayland == false || s.type != SDL_EventType.keyDown || s.key.repeat == false
-            || s.key.timestamp >= pressedAt)
+        if (wayland == false)
         {
             return false;
         }
-        if (ahead.length == 0)
+        bool text = dropText;
+        dropText = false;
+        switch (s.type)
         {
-            ahead.length = 256;
-        }
-        while (true)
-        {
-            int n = SDL_PeepEvents(ahead.ptr, cast(int) ahead.length, SDL_EventAction.peek,
-                SDL_EventType.keyDown, SDL_EventType.textInput);
-            foreach (int i; 0 .. n)
+        case SDL_EventType.keyUp:
+            upScancode = s.key.scancode;
+            upAt = s.key.timestamp;
+            return false;
+        case SDL_EventType.keyDown:
+            if (s.key.repeat == false)
             {
-                const(SDL_Event)* a = &ahead[i];
-                if (a.type == SDL_EventType.textInput)
-                {
-                    continue;
-                }
-                bool sameKey = (a.type == SDL_EventType.keyDown || a.type == SDL_EventType.keyUp)
-                    && a.key.scancode == s.key.scancode;
-                if (sameKey == false || (a.type == SDL_EventType.keyDown && a.key.repeat == false))
-                {
-                    return false;
-                }
-                if (a.type == SDL_EventType.keyUp)
-                {
-                    SDL_PeepEvents(ahead.ptr, i, SDL_EventAction.get, SDL_EventType.keyDown, SDL_EventType.textInput);
-                    if (logInput)
-                    {
-                        stderr.writefln("dentrite: dropped a burst of %d repeat events before a key up", i + 1);
-                    }
-                    return true;
-                }
+                bool fake = s.key.scancode == upScancode && s.key.timestamp <= upAt;
+                imeRepeating = fake ? s.key.scancode : 0;
+                return false;
             }
-            if (n < ahead.length || ahead.length >= 16_384)
+            if (imeRepeating == 0 || s.key.scancode != imeRepeating)
             {
                 return false;
             }
-            ahead.length *= 2;
+            if (logInput)
+            {
+                stderr.writefln("dentrite: dropped a stale repeat of scancode %d", s.key.scancode);
+            }
+            dropText = true;
+            return true;
+        case SDL_EventType.textInput:
+            return text;
+        default:
+            return false;
         }
     }
 
@@ -938,8 +929,9 @@ final class SdlPlatform : Platform, FileDialogs, AccessAdapter, WindowControl, T
         {
         case SDL_EventType.keyDown:
         case SDL_EventType.keyUp:
-            stderr.writefln("dentrite: key %s scancode %d key 0x%x raw %d mods 0x%x",
-                s.type == SDL_EventType.keyDown ? "down" : "up", s.key.scancode, s.key.key, s.key.raw, s.key.mod);
+            stderr.writefln("dentrite: key %s scancode %d key 0x%x raw %d mods 0x%x%s at %d",
+                s.type == SDL_EventType.keyDown ? "down" : "up", s.key.scancode, s.key.key, s.key.raw, s.key.mod,
+                s.key.repeat ? " repeat" : "", s.key.timestamp);
             break;
         case SDL_EventType.textEditing:
             stderr.writefln("dentrite: compose \"%s\" start %d length %d", fromStringz(s.edit.text),
