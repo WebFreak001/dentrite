@@ -44,6 +44,7 @@ import std.algorithm.comparison : clamp, max, min;
 import std.array : array, join;
 import std.format : format;
 import std.meta : AliasSeq;
+import std.random : Random, choice, uniform;
 import std.range : iota;
 import std.math : abs, sin, sqrt;
 import std.string : toLower;
@@ -487,14 +488,15 @@ private Message sampleMessage(long id)
 {
     static immutable string[] words = ["the", "build", "passed", "again", "after", "moving", "rows", "into", "a",
         "pool", "so", "memory", "stays", "flat", "while", "messages", "keep", "coming", "in"];
-    ulong h = cast(ulong) id * 2_654_435_761;
+    Random rng = Random(cast(uint) id);
     string[] w;
-    foreach (size_t k; 0 .. 2 + (h >> 7) % 30)
+    foreach (_; 0 .. uniform(2, 32, rng))
     {
-        w ~= words[((h ^ (k * 0x9E37_79B9_7F4A_7C15)) >> 29) % words.length];
+        w ~= choice(words, rng);
     }
     long run = id >= 0 ? id * 2 / 5 : (id * 2 - 4) / 5;
-    long bit = (cast(ulong) run * 0x9E37_79B9_7F4A_7C15) >> 63;
+    Random runRng = Random(cast(uint) run);
+    long bit = uniform(0, 2, runRng);
     return Message(id, chatAuthors[((run * 2 + bit) % 4 + 4) % 4], w.join(" "));
 }
 
