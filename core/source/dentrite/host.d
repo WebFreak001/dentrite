@@ -1863,10 +1863,15 @@ unittest
     h.inject(PointerKind.up, Point(50, 10));
     assert(sv.scrollY == 32 && clicks == 1, "the mouse does not drag by default");
     sv.drag = ScrollDrag.always;
-    h.inject(PointerKind.down, Point(50, 50));
-    h.inject(PointerKind.move, Point(50, 10));
-    h.inject(PointerKind.up, Point(50, 10));
-    assert(sv.scrollY == 32 + 40 - 8 && clicks == 1);
+    void mouse(PointerKind k, float y, int ms)
+    {
+        h.inject(k, Point(50, y), 1, 1, 0, PointerSource.mouse, t + ms.msecs);
+    }
+
+    mouse(PointerKind.down, 50, 400);
+    mouse(PointerKind.move, 10, 410);
+    mouse(PointerKind.up, 10, 610);
+    assert(sv.scrollY == 32 + 40 - 8 && clicks == 1, "no fling after a pause");
 
     sv.drag = ScrollDrag.inherit;
     h.scrollDrag = ScrollDrag.always;
