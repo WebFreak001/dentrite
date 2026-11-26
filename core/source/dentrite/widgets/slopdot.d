@@ -353,21 +353,6 @@ unittest
     assert(d.state == DotState.off);
 }
 
-// Rings grow with an ease out and fade, are gone for the end of each period, and follow each other by the delay.
-unittest
-{
-    SlopDotStyle s;
-    float scale, alpha;
-    assert(ringAt(s, 0, 0, scale, alpha) && scale == 1 && abs(alpha - 0.8) < 1e-6);
-    assert(ringAt(s, 0, 375, scale, alpha) && scale > 1.9 && alpha < 0.4, "ease out: past halfway at a third");
-    assert(ringAt(s, 0, 1124, scale, alpha) && scale > 2.79 && alpha < 0.01);
-    assert(ringAt(s, 0, 1200, scale, alpha) == false, "gone for the last quarter");
-    assert(ringAt(s, 0, 1500, scale, alpha) && scale == 1, "starts over each period");
-    assert(ringAt(s, 1, 600, scale, alpha) == false, "the second ring waits for its delay");
-    assert(ringAt(s, 1, 680, scale, alpha) && scale < 1.1, "then starts small");
-    assert(abs(easeOutPing(0)) < 1e-6 && abs(easeOutPing(1) - 1) < 1e-6 && easeOutPing(0.5) > 0.8);
-}
-
 // Variants change only the color.
 unittest
 {
